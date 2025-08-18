@@ -1,0 +1,871 @@
+{
+  "tools": [
+    {
+      "name": "open_url",
+      "description": "Open a URL in the browser. Can open in current tab, new tab, new window, or background tab.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to open. Must include protocol (http:// or https://)"
+          },
+          "tab": {
+            "type": "boolean",
+            "description": "Open in a new tab",
+            "default": false
+          },
+          "bg": {
+            "type": "boolean", 
+            "description": "Open in a background tab (only with tab=true)",
+            "default": false
+          },
+          "window": {
+            "type": "boolean",
+            "description": "Open in a new window",
+            "default": false
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Open in private browsing mode",
+            "default": false
+          }
+        },
+        "required": ["url"]
+      },
+      "examples": [
+        "open_url('https://example.com')",
+        "open_url('https://github.com', tab=True)",
+        "open_url('https://private-site.com', private=True)"
+      ]
+    },
+    {
+      "name": "navigate_back",
+      "description": "Go back in browser history. Can go back multiple pages or to specific history index.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of pages to go back",
+            "default": 1
+          },
+          "tab": {
+            "type": "boolean",
+            "description": "Go back in a new tab",
+            "default": false
+          },
+          "quiet": {
+            "type": "boolean",
+            "description": "Don't show error if at beginning of history",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "navigate_back()",
+        "navigate_back(count=3)",
+        "navigate_back(tab=True)"
+      ]
+    },
+    {
+      "name": "navigate_forward", 
+      "description": "Go forward in browser history. Can go forward multiple pages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of pages to go forward",
+            "default": 1
+          },
+          "tab": {
+            "type": "boolean",
+            "description": "Go forward in a new tab", 
+            "default": false
+          },
+          "quiet": {
+            "type": "boolean",
+            "description": "Don't show error if at end of history",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "navigate_forward()",
+        "navigate_forward(count=2)"
+      ]
+    },
+    {
+      "name": "reload_page",
+      "description": "Reload the current page. Can force reload to bypass cache.",
+      "parameters": {
+        "type": "object", 
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Force reload, bypassing cache",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "reload_page()",
+        "reload_page(force=True)"
+      ]
+    },
+    {
+      "name": "stop_loading",
+      "description": "Stop loading the current page.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "examples": [
+        "stop_loading()"
+      ]
+    },
+    {
+      "name": "scroll_page",
+      "description": "Scroll the page in various directions and amounts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right", "top", "bottom", "page-up", "page-down"],
+            "description": "Direction to scroll"
+          },
+          "amount": {
+            "type": "string",
+            "enum": ["page", "half", "line"],
+            "description": "Amount to scroll",
+            "default": "page"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Multiplier for scroll amount",
+            "default": 1
+          }
+        },
+        "required": ["direction"]
+      },
+      "examples": [
+        "scroll_page('down')",
+        "scroll_page('up', count=3)",
+        "scroll_page('page-down')"
+      ]
+    },
+    {
+      "name": "scroll_to_position",
+      "description": "Scroll to a specific position on the page by percentage.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "percentage": {
+            "type": "integer",
+            "description": "Percentage of page to scroll to (0-100)",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "horizontal": {
+            "type": "boolean",
+            "description": "Scroll horizontally instead of vertically",
+            "default": false
+          }
+        },
+        "required": ["percentage"]
+      },
+      "examples": [
+        "scroll_to_position(50)",
+        "scroll_to_position(25, horizontal=True)"
+      ]
+    },
+    {
+      "name": "zoom_page",
+      "description": "Change page zoom level. Can zoom in, out, or set specific level.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["in", "out", "set"],
+            "description": "Zoom action to perform"
+          },
+          "level": {
+            "type": "integer",
+            "description": "Zoom level percentage (for 'set' action)",
+            "minimum": 25,
+            "maximum": 500
+          },
+          "count": {
+            "type": "integer", 
+            "description": "Number of zoom steps (for 'in'/'out' actions)",
+            "default": 1
+          }
+        },
+        "required": ["action"]
+      },
+      "examples": [
+        "zoom_page('in')",
+        "zoom_page('out', count=2)",
+        "zoom_page('set', level=150)"
+      ]
+    },
+    {
+      "name": "search_page",
+      "description": "Search for text on the current page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to search for"
+          },
+          "reverse": {
+            "type": "boolean",
+            "description": "Search in reverse direction",
+            "default": false
+          }
+        },
+        "required": ["text"]
+      },
+      "examples": [
+        "search_page('example')",
+        "search_page('error', reverse=True)"
+      ]
+    },
+    {
+      "name": "search_next",
+      "description": "Go to next search result on page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of results to skip",
+            "default": 1
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "search_next()",
+        "search_next(count=3)"
+      ]
+    },
+    {
+      "name": "search_previous",
+      "description": "Go to previous search result on page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "description": "Number of results to skip backwards",
+            "default": 1
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "search_previous()",
+        "search_previous(count=2)"
+      ]
+    },
+    {
+      "name": "tab_new",
+      "description": "Open a new tab, optionally with a URL.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to open in new tab (optional)"
+          },
+          "bg": {
+            "type": "boolean",
+            "description": "Open in background",
+            "default": false
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Open in private mode",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "tab_new()",
+        "tab_new('https://example.com')",
+        "tab_new('https://private.com', private=True)"
+      ]
+    },
+    {
+      "name": "tab_close",
+      "description": "Close the current tab or a specific tab.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Force close without confirmation for pinned tabs",
+            "default": false
+          },
+          "count": {
+            "type": "integer",
+            "description": "Tab index to close (1-based)"
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "tab_close()",
+        "tab_close(force=True)",
+        "tab_close(count=3)"
+      ]
+    },
+    {
+      "name": "tab_switch",
+      "description": "Switch to a different tab.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": ["next", "prev", "first", "last"],
+            "description": "Direction to switch tabs"
+          },
+          "index": {
+            "type": "integer",
+            "description": "Specific tab index to switch to (1-based)"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of tabs to move",
+            "default": 1
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "tab_switch('next')",
+        "tab_switch('prev', count=2)",
+        "tab_switch(index=3)"
+      ]
+    },
+    {
+      "name": "tab_move",
+      "description": "Move the current tab to a different position.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "string",
+            "enum": ["start", "end", "+", "-"],
+            "description": "Where to move the tab"
+          },
+          "index": {
+            "type": "integer",
+            "description": "Specific position to move to (1-based)"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of positions to move",
+            "default": 1
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "tab_move('start')",
+        "tab_move('+', count=2)",
+        "tab_move(index=1)"
+      ]
+    },
+    {
+      "name": "tab_pin",
+      "description": "Pin or unpin the current tab.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "examples": [
+        "tab_pin()"
+      ]
+    },
+    {
+      "name": "tab_clone",
+      "description": "Duplicate the current tab.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "bg": {
+            "type": "boolean",
+            "description": "Open clone in background",
+            "default": false
+          },
+          "window": {
+            "type": "boolean",
+            "description": "Open clone in new window",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "tab_clone()",
+        "tab_clone(bg=True)"
+      ]
+    },
+    {
+      "name": "click_element",
+      "description": "Click on a page element using CSS selector, ID, or other selector types.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "selector_type": {
+            "type": "string",
+            "enum": ["css", "id", "xpath", "text", "focused"],
+            "description": "Type of selector to use"
+          },
+          "selector_value": {
+            "type": "string",
+            "description": "Selector value (not needed for 'focused' type)"
+          }
+        },
+        "required": ["selector_type"]
+      },
+      "examples": [
+        "click_element('css', '.button')",
+        "click_element('id', 'submit-btn')",
+        "click_element('focused')"
+      ]
+    },
+    {
+      "name": "type_text",
+      "description": "Type text at the current cursor position or in focused input field.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to type"
+          },
+          "clear_first": {
+            "type": "boolean",
+            "description": "Clear existing text first",
+            "default": false
+          }
+        },
+        "required": ["text"]
+      },
+      "examples": [
+        "type_text('Hello World')",
+        "type_text('new text', clear_first=True)"
+      ]
+    },
+    {
+      "name": "send_key",
+      "description": "Send specific key combinations or special keys.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Key combination to send (e.g., '<Ctrl-c>', '<Enter>', '<Tab>')"
+          },
+          "global": {
+            "type": "boolean",
+            "description": "Send to qutebrowser instead of webpage",
+            "default": false
+          }
+        },
+        "required": ["key"]
+      },
+      "examples": [
+        "send_key('<Enter>')",
+        "send_key('<Ctrl-c>')",
+        "send_key('<Ctrl-t>', global=True)"
+      ]
+    },
+    {
+      "name": "fill_form",
+      "description": "Fill out a form with multiple fields automatically.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "selector_type": {
+                  "type": "string",
+                  "enum": ["css", "id", "name", "xpath"]
+                },
+                "selector_value": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string",
+                  "enum": ["text", "email", "password", "select", "checkbox"],
+                  "default": "text"
+                }
+              },
+              "required": ["selector_type", "selector_value", "value"]
+            },
+            "description": "List of form fields to fill"
+          },
+          "submit": {
+            "type": "boolean",
+            "description": "Submit form after filling",
+            "default": true
+          }
+        },
+        "required": ["fields"]
+      },
+      "examples": [
+        "fill_form([{'selector_type': 'css', 'selector_value': 'input[type=\"email\"]', 'value': 'user@example.com'}])"
+      ]
+    },
+    {
+      "name": "execute_javascript",
+      "description": "Execute JavaScript code on the current page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute"
+          },
+          "quiet": {
+            "type": "boolean",
+            "description": "Don't show result output",
+            "default": false
+          }
+        },
+        "required": ["code"]
+      },
+      "examples": [
+        "execute_javascript('console.log(\"Hello\");')",
+        "execute_javascript('document.title', quiet=False)"
+      ]
+    },
+    {
+      "name": "set_config",
+      "description": "Change qutebrowser configuration settings.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "option": {
+            "type": "string",
+            "description": "Configuration option name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Value to set"
+          },
+          "temp": {
+            "type": "boolean",
+            "description": "Set temporarily until browser restart",
+            "default": false
+          }
+        },
+        "required": ["option", "value"]
+      },
+      "examples": [
+        "set_config('content.javascript.enabled', 'true')",
+        "set_config('zoom.default', '150%', temp=True)"
+      ]
+    },
+    {
+      "name": "get_page_info",
+      "description": "Get information about the current page including title, URL, content, links, forms.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "include_content": {
+            "type": "boolean",
+            "description": "Include page text content",
+            "default": true
+          },
+          "include_links": {
+            "type": "boolean",
+            "description": "Include page links",
+            "default": true
+          },
+          "include_forms": {
+            "type": "boolean",
+            "description": "Include form information",
+            "default": true
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "get_page_info()",
+        "get_page_info(include_content=False)"
+      ]
+    },
+    {
+      "name": "get_browser_state",
+      "description": "Get current browser state including tabs, windows, navigation state.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "detailed": {
+            "type": "boolean",
+            "description": "Include detailed state information",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "get_browser_state()",
+        "get_browser_state(detailed=True)"
+      ]
+    },
+    {
+      "name": "wait_for_load",
+      "description": "Wait for the current page to finish loading.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "type": "integer",
+            "description": "Maximum time to wait in seconds",
+            "default": 30
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "wait_for_load()",
+        "wait_for_load(timeout=60)"
+      ]
+    },
+    {
+      "name": "wait_for_element",
+      "description": "Wait for a specific element to appear on the page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "selector_type": {
+            "type": "string",
+            "enum": ["css", "id", "xpath"],
+            "description": "Type of selector"
+          },
+          "selector_value": {
+            "type": "string",
+            "description": "Selector value"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Maximum time to wait in seconds",
+            "default": 10
+          }
+        },
+        "required": ["selector_type", "selector_value"]
+      },
+      "examples": [
+        "wait_for_element('css', '.loading-complete')",
+        "wait_for_element('id', 'content', timeout=20)"
+      ]
+    },
+    {
+      "name": "take_screenshot",
+      "description": "Take a screenshot of the current page or selected area.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "Filename to save screenshot (optional)"
+          },
+          "selection": {
+            "type": "boolean",
+            "description": "Screenshot selected area only",
+            "default": false
+          },
+          "clipboard": {
+            "type": "boolean",
+            "description": "Copy to clipboard instead of saving",
+            "default": false
+          }
+        },
+        "required": []
+      },
+      "examples": [
+        "take_screenshot()",
+        "take_screenshot(filename='page.png')",
+        "take_screenshot(clipboard=True)"
+      ]
+    },
+    {
+      "name": "copy_to_clipboard",
+      "description": "Copy various content to clipboard (URL, title, selected text, etc.).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "enum": ["url", "title", "selection", "page_source", "pretty_url"],
+            "description": "Type of content to copy"
+          }
+        },
+        "required": ["content_type"]
+      },
+      "examples": [
+        "copy_to_clipboard('url')",
+        "copy_to_clipboard('title')",
+        "copy_to_clipboard('selection')"
+      ]
+    },
+    {
+      "name": "smart_action",
+      "description": "Execute smart actions based on natural language description. This is a high-level tool that interprets intent and executes appropriate actions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string", 
+            "description": "Natural language description of what to do"
+          },
+          "context": {
+            "type": "object",
+            "description": "Additional context information (credentials, preferences, etc.)",
+            "default": {}
+          }
+        },
+        "required": ["goal"]
+      },
+      "examples": [
+        "smart_action('search for qutebrowser documentation')",
+        "smart_action('login to this site', context={'username': 'user', 'password': 'pass'})",
+        "smart_action('scroll down to find the pricing section')"
+      ]
+    },
+    {
+      "name": "create_workflow",
+      "description": "Create and execute a multi-step automated workflow.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Workflow name"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "Action to perform"
+                },
+                "parameters": {
+                  "type": "object",
+                  "description": "Action parameters"
+                }
+              }
+            },
+            "description": "List of workflow steps"
+          },
+          "error_handling": {
+            "type": "string",
+            "enum": ["stop", "continue", "retry"],
+            "description": "How to handle errors",
+            "default": "stop"
+          }
+        },
+        "required": ["name", "steps"]
+      },
+      "examples": [
+        "create_workflow('login_and_navigate', [{'action': 'open_url', 'parameters': {'url': 'https://site.com'}}, {'action': 'fill_form', 'parameters': {'fields': [...]}}])"
+      ]
+    }
+  ],
+  "tool_categories": {
+    "navigation": ["open_url", "navigate_back", "navigate_forward", "reload_page", "stop_loading"],
+    "page_interaction": ["scroll_page", "scroll_to_position", "zoom_page", "search_page", "search_next", "search_previous"],
+    "tab_management": ["tab_new", "tab_close", "tab_switch", "tab_move", "tab_pin", "tab_clone"],
+    "element_interaction": ["click_element", "type_text", "send_key", "fill_form"],
+    "information_gathering": ["get_page_info", "get_browser_state", "take_screenshot", "copy_to_clipboard"],
+    "advanced": ["execute_javascript", "set_config", "smart_action", "create_workflow"],
+    "waiting": ["wait_for_load", "wait_for_element"]
+  },
+  "common_patterns": {
+    "login_workflow": {
+      "description": "Common pattern for logging into websites",
+      "steps": [
+        "Navigate to login page",
+        "Fill login form with credentials", 
+        "Submit form",
+        "Wait for redirect or confirmation"
+      ],
+      "tools": ["open_url", "fill_form", "wait_for_load"]
+    },
+    "search_and_click": {
+      "description": "Search for content and click on results",
+      "steps": [
+        "Navigate to search engine or site",
+        "Find search box and enter query",
+        "Wait for results",
+        "Click on relevant result"
+      ],
+      "tools": ["open_url", "click_element", "type_text", "wait_for_load"]
+    },
+    "form_automation": {
+      "description": "Automate form filling tasks",
+      "steps": [
+        "Navigate to form page",
+        "Fill form fields with data",
+        "Submit form",
+        "Handle confirmation or errors"
+      ],
+      "tools": ["open_url", "fill_form", "wait_for_load", "get_page_info"]
+    },
+    "content_extraction": {
+      "description": "Extract information from web pages",
+      "steps": [
+        "Navigate to target page",
+        "Wait for content to load",
+        "Extract text, links, or data",
+        "Process or save extracted content"
+      ],
+      "tools": ["open_url", "get_page_info", "wait_for_load", "execute_javascript"]
+    }
+  },
+  "usage_guidelines": {
+    "safety": [
+      "Always validate URLs before opening them",
+      "Be careful with form submissions that could cause irreversible actions",
+      "Use temporary settings when possible to avoid permanent changes",
+      "Respect website rate limits and terms of service"
+    ],
+    "efficiency": [
+      "Use smart_action for complex tasks when possible",
+      "Combine multiple simple actions into workflows for repetitive tasks",
+      "Wait for page loads before interacting with elements",
+      "Use appropriate selectors (ID preferred over complex CSS)"
+    ],
+    "reliability": [
+      "Always check if elements exist before interacting with them",
+      "Use wait_for_element when dealing with dynamic content",
+      "Handle errors gracefully and provide fallback options",
+      "Verify successful completion of critical actions"
+    ]
+  }
+}

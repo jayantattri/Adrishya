@@ -1,0 +1,222 @@
+{
+  "agent_profiles": {
+    "default": {
+      "name": "Default Browser Assistant",
+      "description": "General-purpose browser assistant with balanced capabilities",
+      "llm_provider": "openai",
+      "model": "gpt-4",
+      "temperature": 0.1,
+      "max_tokens": 1500,
+      "max_tool_calls": 10,
+      "timeout": 30,
+      "personality": "helpful and efficient",
+      "capabilities": [
+        "navigation",
+        "tab_management", 
+        "page_interaction",
+        "form_filling",
+        "information_extraction",
+        "automation"
+      ]
+    },
+    "research_assistant": {
+      "name": "Research Assistant",
+      "description": "Specialized for research, information gathering, and content analysis",
+      "llm_provider": "anthropic",
+      "model": "claude-3-sonnet-20240229",
+      "temperature": 0.05,
+      "max_tokens": 2000,
+      "max_tool_calls": 15,
+      "timeout": 45,
+      "personality": "thorough and analytical",
+      "capabilities": [
+        "information_extraction",
+        "content_analysis",
+        "search_optimization",
+        "data_collection",
+        "tab_management"
+      ]
+    },
+    "automation_expert": {
+      "name": "Automation Expert", 
+      "description": "Focused on complex workflow automation and repetitive tasks",
+      "llm_provider": "openai",
+      "model": "gpt-4",
+      "temperature": 0.0,
+      "max_tokens": 1000,
+      "max_tool_calls": 20,
+      "timeout": 60,
+      "personality": "precise and systematic",
+      "capabilities": [
+        "workflow_automation",
+        "form_filling",
+        "data_entry",
+        "task_sequences",
+        "error_handling"
+      ]
+    },
+    "local_assistant": {
+      "name": "Local Privacy Assistant",
+      "description": "Privacy-focused assistant using local Ollama models",
+      "llm_provider": "ollama",
+      "model": "llama2",
+      "api_base": "http://localhost:11434",
+      "temperature": 0.2,
+      "max_tokens": 1200,
+      "max_tool_calls": 8,
+      "timeout": 90,
+      "personality": "privacy-conscious and reliable",
+      "capabilities": [
+        "navigation",
+        "basic_automation",
+        "privacy_protection",
+        "local_processing"
+      ]
+    },
+    "quick_helper": {
+      "name": "Quick Helper",
+      "description": "Fast responses for simple browser tasks",
+      "llm_provider": "openai",
+      "model": "gpt-3.5-turbo",
+      "temperature": 0.3,
+      "max_tokens": 800,
+      "max_tool_calls": 5,
+      "timeout": 15,
+      "personality": "quick and direct",
+      "capabilities": [
+        "navigation",
+        "simple_interactions",
+        "quick_searches",
+        "basic_tab_management"
+      ]
+    }
+  },
+  "llm_providers": {
+    "openai": {
+      "name": "OpenAI",
+      "description": "OpenAI GPT models (GPT-3.5, GPT-4)",
+      "supported_models": [
+        "gpt-4",
+        "gpt-4-turbo-preview",
+        "gpt-3.5-turbo",
+        "gpt-3.5-turbo-16k"
+      ],
+      "requires_api_key": true,
+      "api_key_env": "OPENAI_API_KEY",
+      "pricing": "pay-per-use",
+      "features": [
+        "function_calling",
+        "large_context",
+        "fast_responses",
+        "high_accuracy"
+      ]
+    },
+    "anthropic": {
+      "name": "Anthropic Claude", 
+      "description": "Anthropic's Claude models",
+      "supported_models": [
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
+        "claude-3-haiku-20240307"
+      ],
+      "requires_api_key": true,
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "pricing": "pay-per-use",
+      "features": [
+        "tool_calling",
+        "large_context",
+        "reasoning",
+        "safety_focused"
+      ]
+    },
+    "ollama": {
+      "name": "Ollama",
+      "description": "Local models via Ollama",
+      "supported_models": [
+        "llama2",
+        "llama2:13b",
+        "llama2:70b",
+        "mistral",
+        "mixtral",
+        "codellama",
+        "dolphin-mistral"
+      ],
+      "requires_api_key": false,
+      "api_key_env": null,
+      "pricing": "free",
+      "features": [
+        "local_processing",
+        "privacy",
+        "customizable",
+        "offline_capable"
+      ]
+    }
+  },
+  "capability_definitions": {
+    "navigation": {
+      "description": "Basic web navigation (open URLs, back/forward, reload)",
+      "tools": ["open_url", "navigate_back", "navigate_forward", "reload_page"]
+    },
+    "tab_management": {
+      "description": "Managing browser tabs (create, close, switch, organize)",
+      "tools": ["tab_new", "tab_close", "tab_switch", "tab_move", "tab_pin"]
+    },
+    "page_interaction": {
+      "description": "Interacting with page content (scroll, zoom, search, click)",
+      "tools": ["scroll_page", "zoom_page", "search_page", "click_element"]
+    },
+    "form_filling": {
+      "description": "Automated form filling and submission", 
+      "tools": ["fill_form", "type_text", "click_element", "send_key"]
+    },
+    "information_extraction": {
+      "description": "Extracting and analyzing page content",
+      "tools": ["get_page_info", "execute_javascript", "copy_to_clipboard"]
+    },
+    "automation": {
+      "description": "Complex workflow automation and task sequences",
+      "tools": ["smart_action", "create_workflow", "wait_for_load"]
+    },
+    "workflow_automation": {
+      "description": "Advanced multi-step automation workflows",
+      "tools": ["create_workflow", "smart_action", "wait_for_element"]
+    },
+    "data_entry": {
+      "description": "Automated data entry and form processing",
+      "tools": ["fill_form", "type_text", "click_element"]
+    },
+    "search_optimization": {
+      "description": "Optimized search and information discovery",
+      "tools": ["search_page", "click_element", "get_page_info"]
+    },
+    "privacy_protection": {
+      "description": "Privacy-focused browsing features",
+      "tools": ["set_config", "tab_new", "execute_javascript"]
+    }
+  },
+  "security_settings": {
+    "allowed_domains": [],
+    "blocked_domains": [],
+    "require_confirmation_for": [
+      "form_submission",
+      "file_download",
+      "external_navigation"
+    ],
+    "max_automation_time": 300,
+    "max_tabs_per_session": 20,
+    "safe_mode": false
+  },
+  "personalization": {
+    "response_style": "conversational",
+    "verbosity_level": "balanced",
+    "error_reporting": "detailed", 
+    "learning_enabled": false,
+    "context_memory": 10
+  },
+  "performance_settings": {
+    "cache_responses": true,
+    "parallel_execution": false,
+    "batch_operations": true,
+    "optimize_for": "accuracy"
+  }
+}
