@@ -58,48 +58,66 @@ class AIStateQueryProcessor:
             'window_id': window_id
         }
         
+        log.misc.debug(f"Processing query: '{query}' (lowercase: '{query_lower}')")
+        
         # Determine what state to collect based on query keywords
         if any(word in query_lower for word in ['tab', 'tabs', 'switch', 'close', 'open']):
+            log.misc.debug("Collecting tabs information")
             collected_state['tabs'] = self.state_collectors['tabs'](window_id)
             
         if any(word in query_lower for word in ['performance', 'speed', 'memory', 'cpu', 'slow', 'fast']):
+            log.misc.debug("Collecting performance information")
             collected_state['performance'] = self.state_collectors['performance'](window_id)
             
         if any(word in query_lower for word in ['content', 'page', 'text', 'links', 'forms', 'images']):
+            log.misc.debug("Collecting content information")
             collected_state['content'] = self.state_collectors['content'](window_id)
             
         if any(word in query_lower for word in ['window', 'fullscreen', 'size']):
+            log.misc.debug("Collecting window information")
             collected_state['overview'] = self.state_collectors['overview'](window_id)
             
         # Always include quick status for basic context
         if not any(key in collected_state for key in ['tabs', 'performance', 'content', 'overview']):
+            log.misc.debug("No specific state collected, using overview")
             collected_state['overview'] = self.state_collectors['overview'](window_id)
         else:
+            log.misc.debug("Adding quick status for context")
             collected_state['quick'] = self.state_collectors['quick'](window_id)
             
+        log.misc.debug(f"Collected state keys: {list(collected_state.keys())}")
         return collected_state
     
     def format_response(self, query: str, state_data: Dict[str, Any]) -> str:
         """Format a human-readable response based on the query and state data."""
         query_lower = query.lower()
         
+        log.misc.debug(f"Formatting response for query: '{query}'")
+        log.misc.debug(f"Available state data keys: {list(state_data.keys())}")
+        
         # Handle different types of queries
         if 'how many tabs' in query_lower or 'tab count' in query_lower:
+            log.misc.debug("Using tab count response")
             return self._format_tab_count_response(state_data)
             
         elif any(word in query_lower for word in ['current tab', 'active tab', 'this tab']):
+            log.misc.debug("Using current tab response")
             return self._format_current_tab_response(state_data)
             
         elif any(word in query_lower for word in ['performance', 'speed', 'memory']):
+            log.misc.debug("Using performance response")
             return self._format_performance_response(state_data)
             
-        elif any(word in query_lower for word in ['page content', 'links', 'forms']):
+        elif any(word in query_lower for word in ['content', 'page content', 'links', 'forms', 'images']):
+            log.misc.debug("Using content response")
             return self._format_content_response(state_data)
             
         elif 'all tabs' in query_lower or 'list tabs' in query_lower:
+            log.misc.debug("Using all tabs response")
             return self._format_all_tabs_response(state_data)
             
         else:
+            log.misc.debug("Using general response")
             return self._format_general_response(query, state_data)
     
     def _format_tab_count_response(self, state_data: Dict[str, Any]) -> str:
@@ -170,27 +188,157 @@ class AIStateQueryProcessor:
             if 'error' in content:
                 return f"Error getting page content: {content['error']}"
                 
-            response = f"Page Content Summary:\n"
-            response += f"• Title: {content.get('title', 'Unknown')}\n"
-            response += f"• Content Length: {content.get('content_length', 0)} characters\n"
+            response = f"Page Analysis: {content.get('title', 'Unknown')}\n"
+            response += f"URL: {content.get('url', 'Unknown')}\n"
+            response += "=" * 60 + "\n\n"
             
-            links = content.get('links', {})
-            response += f"• Links: {links.get('count', 0)} total"
-            if links.get('external_count', 0) > 0:
-                response += f" ({links['external_count']} external)"
-            response += "\n"
+            # Page Structure Overview
+            response += "📄 PAGE STRUCTURE:\n"
+            response += "-" * 30 + "\n"
             
-            forms = content.get('forms', {})
-            if forms.get('count', 0) > 0:
-                response += f"• Forms: {forms['count']} forms with {forms.get('input_count', 0)} inputs\n"
-                
-            images = content.get('images', {})
-            if images.get('count', 0) > 0:
-                response += f"• Images: {images['count']} images\n"
-                
-            headings = content.get('headings', {})
-            if headings.get('count', 0) > 0:
-                response += f"• Headings: {headings['count']} headings\n"
+            # Navigation and Header Elements
+            navigation_elements = []
+            main_content = []
+            sidebar_content = []
+            footer_content = []
+            
+            # Organize content by page sections
+            main_text = content.get('main_text', '')
+            headings = content.get('headings', [])
+            links = content.get('links', [])
+            forms = content.get('forms', [])
+            images = content.get('images', [])
+            
+            # Extract navigation elements (typically at top)
+            nav_keywords = ['sign in', 'login', 'register', 'menu', 'home', 'search', 'filter', 'all', 'shorts', 'videos']
+            nav_links = [link for link in links if any(keyword in link.get('text', '').lower() for keyword in nav_keywords)]
+            
+            # Extract main content (video listings, articles, etc.)
+            main_content_links = [link for link in links if link not in nav_links and link.get('text', '').strip()]
+            
+            # Header/Navigation Section
+            if nav_links:
+                response += "🔍 NAVIGATION & HEADER:\n"
+                for link in nav_links[:8]:  # Limit to first 8 nav elements
+                    link_text = link.get('text', '').strip()
+                    if link_text:
+                        response += f"  • {link_text}\n"
+                response += "\n"
+            
+            # Search/Form Section
+            if forms:
+                response += "🔎 SEARCH & FORMS:\n"
+                for form in forms:
+                    form_id = form.get('form_id', 'Search form')
+                    inputs = form.get('inputs', [])
+                    if inputs:
+                        input_types = [inp.get('type', 'text') for inp in inputs]
+                        response += f"  • {form_id}: {', '.join(input_types)} inputs\n"
+                response += "\n"
+            
+            # Main Content Section
+            response += "📺 MAIN CONTENT:\n"
+            response += "-" * 20 + "\n"
+            
+            # Group content by headings to show structure
+            if headings:
+                current_section = ""
+                for heading in headings[:10]:  # Limit to first 10 headings
+                    level = heading.get('level', 'h?')
+                    text = heading.get('text', '').strip()
+                    if text:
+                        if level in ['h1', 'h2']:
+                            response += f"\n📋 {text}\n"
+                            current_section = text
+                        elif level in ['h3', 'h4']:
+                            response += f"  • {text}\n"
+                        else:
+                            response += f"    - {text}\n"
+            
+            # Show key content links (videos, articles, etc.)
+            if main_content_links:
+                response += "\n🎯 KEY CONTENT ITEMS:\n"
+                for i, link in enumerate(main_content_links[:5]):  # Show first 5 main content items
+                    link_text = link.get('text', '').strip()
+                    link_url = link.get('url', '')
+                    if link_text and len(link_text) > 3:
+                        # Truncate long titles
+                        if len(link_text) > 80:
+                            link_text = link_text[:77] + "..."
+                        response += f"  {i+1}. {link_text}\n"
+                        # Show URL if it's a video/article link
+                        if any(keyword in link_url.lower() for keyword in ['watch', 'video', 'article', 'post']):
+                            response += f"     → {link_url}\n"
+            
+            # Media Content
+            if images:
+                response += "\n🖼️ MEDIA CONTENT:\n"
+                response += f"  • {len(images)} images found\n"
+                # Show first few images with descriptions
+                for i, img in enumerate(images[:3]):
+                    img_alt = img.get('alt', '').strip()
+                    if img_alt:
+                        response += f"  {i+1}. {img_alt[:60]}\n"
+            
+            # Page Statistics
+            response += "\n📊 PAGE STATISTICS:\n"
+            response += "-" * 20 + "\n"
+            response += f"• Total Content Length: {content.get('content_length', 0):,} characters\n"
+            response += f"• Total Links: {len(links)} links\n"
+            response += f"• Navigation Elements: {len(nav_links)} items\n"
+            response += f"• Main Content Items: {len(main_content_links)} items\n"
+            response += f"• Headings: {len(headings)} sections\n"
+            response += f"• Forms: {len(forms)} interactive forms\n"
+            response += f"• Images: {len(images)} media elements\n"
+            
+            # Page Type Classification
+            response += "\n🏷️ PAGE TYPE & PURPOSE:\n"
+            response += "-" * 25 + "\n"
+            
+            # Analyze page type based on content
+            page_url = content.get('url', '').lower()
+            page_title = content.get('title', '').lower()
+            main_text_lower = main_text.lower()
+            
+            if 'youtube' in page_url or 'youtube' in page_title:
+                response += "• Type: YouTube video platform\n"
+                response += "• Purpose: Video search results and content discovery\n"
+                response += "• Key Features: Video listings, search functionality, navigation filters\n"
+            elif 'search' in page_url or 'results' in page_url:
+                response += "• Type: Search results page\n"
+                response += "• Purpose: Display search results and filtering options\n"
+            elif any(word in main_text_lower for word in ['login', 'sign in', 'register']):
+                response += "• Type: Authentication page\n"
+                response += "• Purpose: User login or registration\n"
+            elif len(forms) > 0:
+                response += "• Type: Interactive form page\n"
+                response += "• Purpose: Data input and submission\n"
+            else:
+                response += "• Type: Content page\n"
+                response += "• Purpose: Information display and navigation\n"
+            
+            # User Action Suggestions
+            response += "\n💡 AVAILABLE ACTIONS:\n"
+            response += "-" * 20 + "\n"
+            
+            if forms:
+                response += "• Fill out forms or search\n"
+            if nav_links:
+                response += "• Navigate to different sections\n"
+            if main_content_links:
+                response += "• Click on content items\n"
+            if len(links) > 10:
+                response += "• Browse through multiple links\n"
+            
+            # Check if we got limited information due to JavaScript issues
+            if content.get('content_length', 0) == 0 or content.get('content_length', 0) < 100:
+                response += "\n⚠️  Note: Limited content information available. "
+                response += "This may be due to:\n"
+                response += "• JavaScript being disabled\n"
+                response += "• Page not fully loaded\n"
+                response += "• Special page type (chrome://, about:, etc.)\n"
+                response += "• Page security restrictions\n"
+                response += "\nTry enabling JavaScript or waiting for the page to load completely."
                 
             return response
             
@@ -310,6 +458,37 @@ def ai_query(win_id: int, query: str, output: str = 'message') -> None:
     except Exception as e:
         log.misc.exception("Error in ai_query command")
         raise cmdutils.CommandError(f"Error processing AI query: {str(e)}")
+
+
+@cmdutils.register()
+@cmdutils.argument('win_id', value=usertypes.CommandValue.win_id)
+def ai_debug_js(win_id: int) -> None:
+    """Debug JavaScript execution for AI agent tools.
+    
+    This command helps diagnose why JavaScript execution might be failing
+    in the AI agent tools.
+    """
+    try:
+        # Import and run the debug tool
+        import sys
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'ai_agent_tools'))
+        
+        from test_javascript_debug import test_javascript_execution
+        
+        # Run the debug tool
+        result = test_javascript_execution()
+        
+        if result:
+            message.info("JavaScript debug completed. Check the console output for details.")
+        else:
+            message.error("JavaScript debug failed. Check the console output for errors.")
+            
+    except ImportError as e:
+        message.error(f"Could not import debug tool: {e}")
+    except Exception as e:
+        log.misc.exception("Error in ai_debug_js command")
+        message.error(f"Error running JavaScript debug: {str(e)}")
 
 
 def _show_response_in_tab(win_id: int, query: str, response: str, state_data: Dict[str, Any]) -> None:

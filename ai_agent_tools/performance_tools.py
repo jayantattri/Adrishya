@@ -472,6 +472,7 @@ class PerformanceTools:
                     result['value'] = js_result
                     result['completed'] = True
                 
+                # WebEngineTab.run_js_async only takes code and callback parameters
                 tab.run_js_async(js_code, callback)
                 
                 # Wait for result with timeout

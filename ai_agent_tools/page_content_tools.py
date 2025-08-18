@@ -178,15 +178,55 @@ class PageContentTools:
                 
             log.misc.debug(f"Executing JavaScript on tab: {type(tab).__name__}")
             log.misc.debug(f"JavaScript code length: {len(js_code)} characters")
+            
+            # Check if tab is valid and not deleted
+            if hasattr(tab, 'is_deleted') and tab.is_deleted():
+                log.misc.debug("Tab is deleted, cannot execute JavaScript")
+                return None
+                
+            # Check if tab has a valid URL
+            try:
+                url = tab.url().toString() if tab.url() else ""
+                log.misc.debug(f"Tab URL: {url}")
+                
+                # Skip JavaScript execution for special URLs
+                if url.startswith(('chrome://', 'chrome-devtools://', 'qute://', 'about:')):
+                    log.misc.debug(f"Skipping JavaScript execution for special URL: {url}")
+                    return None
+                    
+            except Exception as e:
+                log.misc.debug(f"Error getting tab URL: {e}")
+                
+            # Check if JavaScript is enabled (if we can access config)
+            try:
+                from qutebrowser.api import config
+                if not config.val.content.javascript.enabled:
+                    log.misc.debug("JavaScript is disabled in qutebrowser configuration")
+                    return None
+            except ImportError:
+                log.misc.debug("Could not check JavaScript configuration")
+            except Exception as e:
+                log.misc.debug(f"Error checking JavaScript configuration: {e}")
                 
             # Try different methods to execute JavaScript in qutebrowser
             if hasattr(tab, 'run_js_async'):
-                return self._execute_with_run_js_async(tab, js_code)
-            elif hasattr(tab, 'page') and hasattr(tab.page(), 'runJavaScript'):
-                return self._execute_with_qt_webengine(tab, js_code)
-            else:
-                log.misc.debug("No JavaScript execution method available")
-                return None
+                result = self._execute_with_run_js_async(tab, js_code)
+                if result is not None:
+                    log.misc.debug("JavaScript execution successful with run_js_async")
+                    return result
+                else:
+                    log.misc.debug("JavaScript execution failed with run_js_async")
+                    
+            if hasattr(tab, 'page') and hasattr(tab.page(), 'runJavaScript'):
+                result = self._execute_with_qt_webengine(tab, js_code)
+                if result is not None:
+                    log.misc.debug("JavaScript execution successful with Qt WebEngine")
+                    return result
+                else:
+                    log.misc.debug("JavaScript execution failed with Qt WebEngine")
+                    
+            log.misc.debug("No JavaScript execution method available or all methods failed")
+            return None
                 
         except Exception as e:
             log.misc.debug(f"Error executing JavaScript: {e}")
@@ -199,20 +239,19 @@ class PageContentTools:
             result = {'value': None, 'error': None, 'completed': False}
             
             def callback(js_result):
+                log.misc.debug(f"JavaScript callback received: {js_result}")
                 result['value'] = js_result
                 result['completed'] = True
                 
-            def error_callback(error):
-                result['error'] = str(error)
-                result['completed'] = True
-            
-            tab.run_js_async(js_code, callback, error_callback)
+            # WebEngineTab.run_js_async only takes code, callback, and world parameters
+            # No separate error callback parameter
+            tab.run_js_async(js_code, callback)
             
             # Wait for result with improved timeout handling
             import time
-            timeout = 5.0  # Increased timeout to 5 seconds
+            timeout = 10.0  # Increased timeout to 10 seconds
             start_time = time.time()
-            sleep_interval = 0.01
+            sleep_interval = 0.05  # Increased sleep interval
             
             while not result['completed'] and (time.time() - start_time) < timeout:
                 time.sleep(sleep_interval)
@@ -228,6 +267,13 @@ class PageContentTools:
                 return result['value']
             else:
                 log.misc.debug(f"JavaScript execution timed out after {timeout}s")
+                # Try to get any error information from the tab
+                try:
+                    if hasattr(tab, 'page') and hasattr(tab.page(), 'runJavaScript'):
+                        log.misc.debug("Attempting fallback to direct Qt WebEngine method")
+                        return self._execute_with_qt_webengine(tab, js_code)
+                except Exception as e:
+                    log.misc.debug(f"Fallback method also failed: {e}")
                 return None
                 
         except Exception as e:
@@ -242,6 +288,7 @@ class PageContentTools:
             result = {'value': None, 'completed': False}
             
             def js_callback(js_result):
+                log.misc.debug(f"Qt WebEngine callback received: {js_result}")
                 result['value'] = js_result
                 result['completed'] = True
             
@@ -249,11 +296,12 @@ class PageContentTools:
             
             # Wait for result with improved timeout handling
             import time
-            timeout = 5.0  # Increased timeout
+            timeout = 10.0  # Increased timeout
             start_time = time.time()
+            sleep_interval = 0.05  # Increased sleep interval
             
             while not result['completed'] and (time.time() - start_time) < timeout:
-                time.sleep(0.01)
+                time.sleep(sleep_interval)
                 # Process Qt events if available
                 if QApplication and QApplication.instance():
                     QApplication.processEvents()
@@ -328,55 +376,36 @@ class PageContentTools:
     def get_page_text_content(self, window_id: int = 0) -> Optional[str]:
         """Get the main text content of the current page."""
         try:
-            # If running outside qutebrowser, return mock content
-            if not QUTEBROWSER_AVAILABLE:
-                return (
-                    "Mock Page Content for AI Agent Tools Test\n\n"
-                    "This is a comprehensive test page demonstrating the AI agent tools for qutebrowser. "
-                    "The tools provide complete browser state information including tab management, "
-                    "page content analysis, and performance monitoring.\n\n"
-                    "Key Features:\n"
-                    "• Browser state monitoring and tab management\n"
-                    "• Page content extraction and analysis\n"
-                    "• Performance metrics and system resource tracking\n"
-                    "• Network monitoring and request analysis\n"
-                    "• Real-time state updates and event handling\n\n"
-                    "This mock content is displayed because the tools are currently running outside "
-                    "of the qutebrowser environment. When run within qutebrowser, these tools will "
-                    "extract actual page content using JavaScript execution.\n\n"
-                    "For more information, visit the qutebrowser repository on GitHub."
-                )
-            
             tab = self._get_current_tab(window_id)
             if not tab:
-                log.misc.debug("No tab available for text content extraction")
-                return "No tab available for text content extraction"
+                return None
                 
-            # Try to get text content using JavaScript
+            # JavaScript to extract text content
             js_code = """
             (function() {
                 try {
-                    // Get main content text, excluding scripts and styles
-                    var clonedDoc = document.cloneNode(true);
-                    var scripts = clonedDoc.querySelectorAll('script, style, nav, header, footer, aside');
-                    for (var i = 0; i < scripts.length; i++) {
-                        scripts[i].remove();
-                    }
+                    // Try to get the main content area
+                    var mainContent = document.querySelector('main') || 
+                                    document.querySelector('article') || 
+                                    document.querySelector('.content') || 
+                                    document.querySelector('#content') || 
+                                    document.body;
                     
-                    // Get text from main content areas
-                    var mainContent = clonedDoc.querySelector('main, .main-content, .content, #content, .post-content');
                     if (mainContent) {
+                        // Remove script and style elements
+                        var scripts = mainContent.querySelectorAll('script, style, nav, header, footer, aside');
+                        for (var i = 0; i < scripts.length; i++) {
+                            if (scripts[i].parentNode) {
+                                scripts[i].parentNode.removeChild(scripts[i]);
+                            }
+                        }
+                        
                         return mainContent.innerText || mainContent.textContent || '';
                     }
                     
-                    // Fallback to body text
-                    var body = clonedDoc.body;
-                    if (body) {
-                        return body.innerText || body.textContent || '';
-                    }
-                    return '';
+                    return document.body ? (document.body.innerText || document.body.textContent || '') : '';
                 } catch (e) {
-                    return document.body ? document.body.innerText : '';
+                    return 'Error extracting text: ' + e.message;
                 }
             })();
             """
@@ -386,7 +415,18 @@ class PageContentTools:
                 return result.strip()
             else:
                 log.misc.debug("JavaScript execution failed, using fallback")
-                return "Content extraction failed - JavaScript not available"
+                # Try to get basic page info from tab object
+                try:
+                    url = tab.url().toString() if tab and tab.url() else "about:blank"
+                    title = tab.title() if tab and hasattr(tab, 'title') else "Untitled"
+                    
+                    if url.startswith(('chrome://', 'chrome-devtools://', 'qute://', 'about:')):
+                        return f"Special page: {title} (JavaScript execution not available for this page type)"
+                    else:
+                        return f"Page content extraction failed - JavaScript execution not available for: {title}"
+                        
+                except Exception as e:
+                    return f"Content extraction failed - JavaScript not available (Error: {e})"
                 
         except Exception as e:
             log.misc.error(f"Error getting page text content: {e}")
@@ -480,37 +520,23 @@ class PageContentTools:
                         )
                         links.append(link_info)
                     except Exception as e:
-                        log.misc.debug(f"Error parsing link data: {e}")
-            else:
-                # Fallback behavior
-                if not QUTEBROWSER_AVAILABLE:
-                    log.misc.debug("Running outside qutebrowser, using mock data")
-                    # Create mock links for testing
-                    mock_links = [
-                        LinkInfo(
-                            url="https://example.com",
-                            text="Example Link",
-                            title="Example Link Title",
-                            is_external=True,
-                            is_download=False
-                        ),
-                        LinkInfo(
-                            url="https://github.com/qutebrowser/qutebrowser",
-                            text="Qutebrowser GitHub",
-                            title="Qutebrowser Repository",
-                            is_external=True,
-                            is_download=False
-                        )
-                    ]
-                    links.extend(mock_links)
-                    log.misc.debug(f"Mock data: Added {len(mock_links)} links")
-                else:
-                    log.misc.debug("JavaScript execution not available, trying fallback method")
-                    try:
-                        # Try to get basic page info from tab object
-                        url = tab.url().toString() if tab and tab.url() else "about:blank"
-                        title = tab.title() if tab and hasattr(tab, 'title') else "Untitled"
+                        log.misc.debug(f"Error processing link data: {e}")
+                        continue
                         
+                log.misc.debug(f"Successfully extracted {len(links)} links via JavaScript")
+                return links
+            else:
+                # JavaScript execution failed, try fallback
+                log.misc.debug("JavaScript execution not available, trying fallback method")
+                try:
+                    # Try to get basic page info from tab object
+                    url = tab.url().toString() if tab and tab.url() else "about:blank"
+                    title = tab.title() if tab and hasattr(tab, 'title') else "Untitled"
+                    
+                    if url.startswith(('chrome://', 'chrome-devtools://', 'qute://', 'about:')):
+                        log.misc.debug(f"Special page detected: {url}")
+                        return []  # No links for special pages
+                    else:
                         # Create a basic link info for the current page
                         links.append(LinkInfo(
                             url=url,
@@ -521,10 +547,11 @@ class PageContentTools:
                         ))
                         
                         log.misc.debug(f"Fallback: Found 1 link (current page: {title})")
-                    except Exception as e:
-                        log.misc.debug(f"Fallback method failed: {e}")
+                        return links
                         
-            return links
+                except Exception as e:
+                    log.misc.debug(f"Fallback method failed: {e}")
+                    return []
             
         except Exception as e:
             log.misc.error(f"Error getting page links: {e}")

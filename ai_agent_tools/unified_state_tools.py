@@ -102,7 +102,7 @@ class CompleteBrowserState:
     system_metrics: Optional[Dict[str, Any]] = None
     browser_process: Optional[Dict[str, Any]] = None
     tab_performance: List[Dict[str, Any]] = None
-    network_metrics: Optional[Dict[str, Any]] = None
+    network_metrics: Optional[Any] = None
     performance_score: Optional[float] = None
     
     # Summary information
@@ -299,30 +299,20 @@ class UnifiedBrowserStateTools:
             if not page_content:
                 return {'error': 'Could not get page content'}
             
+            # Convert dataclass objects to dictionaries for easier processing
+            from dataclasses import asdict
+            
             summary = {
                 'title': page_content.title,
                 'url': page_content.url,
+                'main_text': page_content.main_text,  # Include actual text content
                 'content_length': len(page_content.main_text) if page_content.main_text else 0,
-                'links': {
-                    'count': len(page_content.links),
-                    'external_count': len([link for link in page_content.links if link.is_external]),
-                    'download_count': len([link for link in page_content.links if link.is_download])
-                },
-                'forms': {
-                    'count': len(page_content.forms),
-                    'input_count': sum(len(form.inputs) for form in page_content.forms)
-                },
-                'images': {
-                    'count': len(page_content.images)
-                },
-                'headings': {
-                    'count': len(page_content.headings),
-                    'levels': list(set(heading.level for heading in page_content.headings))
-                },
-                'meta_tags': {
-                    'count': len(page_content.meta_tags),
-                    'keys': list(page_content.meta_tags.keys())
-                }
+                'links': [asdict(link) for link in page_content.links],  # Convert to dicts
+                'forms': [asdict(form) for form in page_content.forms],  # Convert to dicts
+                'images': page_content.images,  # Already dicts
+                'headings': page_content.headings,  # Already dicts
+                'meta_tags': page_content.meta_tags,  # Already dicts
+                'page_structure': page_content.page_structure  # Already dict
             }
             
             return summary
