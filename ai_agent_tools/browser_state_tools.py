@@ -16,12 +16,27 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
     from qutebrowser.misc import objects
-    from qutebrowser.utils import objreg
+    from qutebrowser.utils import objreg, log
     from qutebrowser.browser import browsertab
     from qutebrowser.mainwindow import tabbedbrowser
     from qutebrowser.qt.core import QUrl
     from qutebrowser.qt.widgets import QApplication
+    QUTEBROWSER_AVAILABLE = True
 except ImportError as e:
+    QUTEBROWSER_AVAILABLE = False
+    # Create minimal logging for when qutebrowser is not available
+    class DummyLog:
+        def warning(self, msg): print(f"Warning: {msg}")
+        def error(self, msg): print(f"Error: {msg}")
+        def debug(self, msg): print(f"Debug: {msg}")
+    
+    class LogContainer:
+        misc = DummyLog()
+    
+    log = LogContainer()
+    objects = None
+    objreg = None
+    QApplication = None
     print(f"Warning: Could not import qutebrowser modules: {e}")
     print("This module should be run from within qutebrowser or with proper imports")
 
@@ -78,36 +93,62 @@ class BrowserStateTools:
     def __init__(self):
         """Initialize the browser state tools."""
         self._app = None
-        self._browser = None
-        self._active_window_id = None
+        self._browsers = {}  # Cache browsers by window_id
+        
+    def _check_availability(self) -> bool:
+        """Check if qutebrowser is available."""
+        if not QUTEBROWSER_AVAILABLE:
+            log.misc.warning("Qutebrowser modules not available")
+            return False
+        return True
         
     def _get_app_instance(self):
         """Get the qutebrowser application instance."""
+        if not self._check_availability():
+            return None
+            
         if self._app is None:
             try:
                 # Try to get the app from objects
-                if hasattr(objects, 'qapp') and objects.qapp is not None:
+                if objects and hasattr(objects, 'qapp') and objects.qapp is not None:
                     self._app = objects.qapp
-                else:
+                elif QApplication:
                     # Try to get from QApplication
                     self._app = QApplication.instance()
             except Exception as e:
-                print(f"Warning: Could not get app instance: {e}")
+                log.misc.warning(f"Could not get app instance: {e}")
                 return None
         return self._app
     
     def _get_browser_instance(self, window_id: int = 0):
         """Get the browser instance for a specific window."""
+        if not self._check_availability():
+            return None
+            
         try:
-            if self._browser is None:
-                # Try to get from object registry
-                browser = objreg.get('tabbed-browser', scope='window', window=window_id)
-                if browser:
-                    self._browser = browser
-                    self._active_window_id = window_id
-            return self._browser
+            # Check cache first
+            if window_id in self._browsers:
+                browser = self._browsers[window_id]
+                # Verify browser is still valid
+                if browser and hasattr(browser, 'widget') and browser.widget:
+                    return browser
+                else:
+                    # Remove invalid browser from cache
+                    del self._browsers[window_id]
+            
+            # Try to get from object registry
+            if not objreg:
+                return None
+            browser = objreg.get('tabbed-browser', scope='window', window=window_id)
+            if browser:
+                self._browsers[window_id] = browser
+                return browser
+            else:
+                log.misc.warning(f"No browser found for window_id: {window_id}")
+                return None
+                
         except Exception as e:
-            print(f"Warning: Could not get browser instance: {e}")
+            log.misc.warning(f"Could not get browser instance: {e}")
             return None
     
     def get_current_tab_info(self, window_id: int = 0) -> Optional[TabInfo]:
@@ -117,43 +158,71 @@ class BrowserStateTools:
             if not browser:
                 return None
                 
-            current_tab = browser.currentWidget()
+            current_tab = browser.widget.currentWidget()
             if not current_tab:
                 return None
                 
             # Get tab index
-            tab_index = browser.indexOf(current_tab)
+            tab_index = browser.widget.indexOf(current_tab)
             
-            # Get URL and title
-            url = current_tab.url().toString() if current_tab.url() else ""
-            title = current_tab.title() or "Untitled"
+            # Get URL and title safely
+            url = ""
+            try:
+                if hasattr(current_tab, 'url') and current_tab.url():
+                    url = current_tab.url().toString()
+            except Exception as e:
+                log.misc.debug(f"Could not get tab URL: {e}")
+                
+            title = "Untitled"
+            try:
+                if hasattr(current_tab, 'title') and current_tab.title():
+                    title = current_tab.title()
+            except Exception as e:
+                log.misc.debug(f"Could not get tab title: {e}")
             
             # Check if loading
-            is_loading = current_tab.isLoading()
+            is_loading = False
+            try:
+                if hasattr(current_tab, 'isLoading'):
+                    is_loading = current_tab.isLoading()
+            except Exception as e:
+                log.misc.debug(f"Could not get loading state: {e}")
             
             # Check if pinned
-            is_pinned = getattr(current_tab, 'isPinned', lambda: False)()
+            is_pinned = False
+            try:
+                if hasattr(current_tab, 'data') and hasattr(current_tab.data, 'pinned'):
+                    is_pinned = current_tab.data.pinned
+            except Exception as e:
+                log.misc.debug(f"Could not get pinned state: {e}")
             
             # Check navigation state
-            can_go_back = current_tab.history().canGoBack()
-            can_go_forward = current_tab.history().canGoForward()
+            can_go_back = False
+            can_go_forward = False
+            try:
+                if hasattr(current_tab, 'history'):
+                    history = current_tab.history()
+                    can_go_back = history.canGoBack()
+                    can_go_forward = history.canGoForward()
+            except Exception as e:
+                log.misc.debug(f"Could not get navigation state: {e}")
             
             # Get scroll position if available
             scroll_position = None
             try:
-                if hasattr(current_tab, 'scrollPosition'):
-                    pos = current_tab.scrollPosition()
+                if hasattr(current_tab, 'scroller') and hasattr(current_tab.scroller, 'pos'):
+                    pos = current_tab.scroller.pos
                     scroll_position = {'x': pos.x(), 'y': pos.y()}
-            except:
-                pass
+            except Exception as e:
+                log.misc.debug(f"Could not get scroll position: {e}")
                 
             # Get zoom level if available
             zoom_level = None
             try:
-                if hasattr(current_tab, 'zoomFactor'):
-                    zoom_level = current_tab.zoomFactor()
-            except:
-                pass
+                if hasattr(current_tab, 'zoom') and hasattr(current_tab.zoom, 'factor'):
+                    zoom_level = current_tab.zoom.factor
+            except Exception as e:
+                log.misc.debug(f"Could not get zoom level: {e}")
             
             return TabInfo(
                 index=tab_index,
@@ -169,7 +238,7 @@ class BrowserStateTools:
             )
             
         except Exception as e:
-            print(f"Error getting current tab info: {e}")
+            log.misc.error(f"Error getting current tab info: {e}")
             return None
     
     def get_all_tabs_info(self, window_id: int = 0) -> List[TabInfo]:
@@ -177,26 +246,39 @@ class BrowserStateTools:
         try:
             browser = self._get_browser_instance(window_id)
             if not browser:
+                log.misc.warning(f"No browser instance found for window_id: {window_id}")
                 return []
                 
+            log.misc.debug(f"Browser instance found: {type(browser)}")
+            log.misc.debug(f"Browser widget: {type(browser.widget)}")
+            log.misc.debug(f"Widget count: {browser.widget.count()}")
+                
             tabs_info = []
-            for i in range(browser.count()):
-                tab = browser.widget(i)
+            tab_count = browser.widget.count()
+            log.misc.debug(f"Found {tab_count} tabs in browser")
+            
+            for i in range(tab_count):
+                tab = browser.widget.widget(i)
                 if not tab:
                     continue
                     
                 # Get basic tab info
                 url = tab.url().toString() if tab.url() else ""
                 title = tab.title() or "Untitled"
-                is_loading = tab.isLoading()
+                is_loading = getattr(tab, 'isLoading', lambda: False)()
                 is_pinned = getattr(tab, 'isPinned', lambda: False)()
                 
                 # Check if this is the active tab
-                is_active = (browser.currentIndex() == i)
+                is_active = (browser.widget.currentIndex() == i)
                 
                 # Get navigation state
-                can_go_back = tab.history().canGoBack()
-                can_go_forward = tab.history().canGoForward()
+                try:
+                    history = tab.history()
+                    can_go_back = history.canGoBack() if hasattr(history, 'canGoBack') else False
+                    can_go_forward = history.canGoForward() if hasattr(history, 'canGoForward') else False
+                except:
+                    can_go_back = False
+                    can_go_forward = False
                 
                 tab_info = TabInfo(
                     index=i,
@@ -213,7 +295,7 @@ class BrowserStateTools:
             return tabs_info
             
         except Exception as e:
-            print(f"Error getting all tabs info: {e}")
+            log.misc.error(f"Error getting all tabs info: {e}")
             return []
     
     def get_window_state(self, window_id: int = 0) -> Optional[WindowState]:
@@ -246,8 +328,8 @@ class BrowserStateTools:
                 pass
                 
             # Get tab information
-            active_tab_index = browser.currentIndex()
-            total_tabs = browser.count()
+            active_tab_index = browser.widget.currentIndex()
+            total_tabs = browser.widget.count()
             
             return WindowState(
                 window_id=window_id,
@@ -259,7 +341,7 @@ class BrowserStateTools:
             )
             
         except Exception as e:
-            print(f"Error getting window state: {e}")
+            log.misc.error(f"Error getting window state: {e}")
             return None
     
     def get_navigation_state(self, window_id: int = 0) -> Optional[NavigationState]:
@@ -279,7 +361,7 @@ class BrowserStateTools:
             )
             
         except Exception as e:
-            print(f"Error getting navigation state: {e}")
+            log.misc.error(f"Error getting navigation state: {e}")
             return None
     
     def get_browser_metrics(self, window_id: int = 0) -> Optional[BrowserMetrics]:
@@ -295,7 +377,7 @@ class BrowserStateTools:
             )
             
         except Exception as e:
-            print(f"Error getting browser metrics: {e}")
+            log.misc.error(f"Error getting browser metrics: {e}")
             return None
     
     def get_comprehensive_state(self, window_id: int = 0) -> Dict[str, Any]:
@@ -338,7 +420,7 @@ class BrowserStateTools:
             return state
             
         except Exception as e:
-            print(f"Error getting comprehensive state: {e}")
+            log.misc.error(f"Error getting comprehensive state: {e}")
             return {'error': str(e), 'timestamp': datetime.now().isoformat()}
 
 

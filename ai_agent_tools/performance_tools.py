@@ -8,21 +8,42 @@ system resources, and operational metrics.
 import sys
 import os
 import time
-import psutil
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, asdict
 from datetime import datetime
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    psutil = None
+    PSUTIL_AVAILABLE = False
 
 # Add qutebrowser to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
     from qutebrowser.misc import objects
-    from qutebrowser.utils import objreg
+    from qutebrowser.utils import objreg, log
     from qutebrowser.browser import browsertab
     from qutebrowser.qt.core import QUrl, QTimer
     from qutebrowser.qt.widgets import QApplication
+    QUTEBROWSER_AVAILABLE = True
 except ImportError as e:
+    QUTEBROWSER_AVAILABLE = False
+    # Create minimal logging for when qutebrowser is not available
+    class DummyLog:
+        def warning(self, msg): print(f"Warning: {msg}")
+        def error(self, msg): print(f"Error: {msg}")
+        def debug(self, msg): print(f"Debug: {msg}")
+    
+    class LogContainer:
+        misc = DummyLog()
+    
+    log = LogContainer()
+    objects = None
+    objreg = None
+    QApplication = None
     print(f"Warning: Could not import qutebrowser modules: {e}")
     print("This module should be run from within qutebrowser or with proper imports")
 
@@ -93,56 +114,91 @@ class PerformanceTools:
     
     def __init__(self):
         """Initialize the performance tools."""
-        self._browser = None
-        self._active_window_id = None
+        self._browsers = {}  # Cache browsers by window_id
         self._last_snapshot = None
+        
+    def _check_availability(self) -> bool:
+        """Check if qutebrowser is available."""
+        if not QUTEBROWSER_AVAILABLE:
+            log.misc.warning("Qutebrowser modules not available")
+            return False
+        return True
         
     def _get_browser_instance(self, window_id: int = 0):
         """Get the browser instance for a specific window."""
+        if not self._check_availability():
+            return None
+            
         try:
-            if self._browser is None:
-                # Try to get from object registry
-                browser = objreg.get('tabbed-browser', scope='window', window=window_id)
-                if browser:
-                    self._browser = browser
-                    self._active_window_id = window_id
-            return self._browser
+            # Check cache first
+            if window_id in self._browsers:
+                browser = self._browsers[window_id]
+                # Verify browser is still valid
+                if browser and hasattr(browser, 'widget') and browser.widget:
+                    return browser
+                else:
+                    # Remove invalid browser from cache
+                    del self._browsers[window_id]
+            
+            # Try to get from object registry
+            if not objreg:
+                return None
+            browser = objreg.get('tabbed-browser', scope='window', window=window_id)
+            if browser:
+                self._browsers[window_id] = browser
+                return browser
+            else:
+                log.misc.warning(f"No browser found for window_id: {window_id}")
+                return None
+                
         except Exception as e:
-            print(f"Warning: Could not get browser instance: {e}")
+            log.misc.warning(f"Could not get browser instance: {e}")
             return None
     
     def get_system_metrics(self) -> Optional[SystemMetrics]:
         """Get system-level performance metrics."""
+        if not PSUTIL_AVAILABLE:
+            log.misc.warning("psutil not available for system metrics")
+            return None
+            
         try:
             # CPU usage
-            cpu_percent = psutil.cpu_percent(interval=0.1)
+            cpu_percent = psutil.cpu_percent(interval=0.1) if psutil else 0.0
             
             # Memory information
-            memory = psutil.virtual_memory()
-            memory_percent = memory.percent
-            memory_available = memory.available
-            memory_total = memory.total
-            memory_used = memory.used
+            if psutil:
+                memory = psutil.virtual_memory()
+                memory_percent = memory.percent
+                memory_available = memory.available
+                memory_total = memory.total
+                memory_used = memory.used
+            else:
+                memory_percent = 0.0
+                memory_available = 0
+                memory_total = 0
+                memory_used = 0
             
             # Disk usage
             disk_usage_percent = 0.0
-            try:
-                disk = psutil.disk_usage('/')
-                disk_usage_percent = disk.percent
-            except:
-                pass
+            if psutil:
+                try:
+                    disk = psutil.disk_usage('/')
+                    disk_usage_percent = disk.percent
+                except:
+                    pass
             
             # Network I/O
             network_io = {'bytes_sent': 0, 'bytes_recv': 0}
-            try:
-                net_io = psutil.net_io_counters()
-                network_io['bytes_sent'] = net_io.bytes_sent
-                network_io['bytes_recv'] = net_io.bytes_recv
-            except:
-                pass
+            if psutil:
+                try:
+                    net_io = psutil.net_io_counters()
+                    network_io['bytes_sent'] = net_io.bytes_sent
+                    network_io['bytes_recv'] = net_io.bytes_recv
+                except:
+                    pass
             
             # Process count
-            process_count = len(psutil.pids())
+            process_count = len(psutil.pids()) if psutil else 0
             
             return SystemMetrics(
                 cpu_percent=cpu_percent,
@@ -156,13 +212,19 @@ class PerformanceTools:
             )
             
         except Exception as e:
-            print(f"Error getting system metrics: {e}")
+            log.misc.error(f"Error getting system metrics: {e}")
             return None
     
     def get_browser_process_metrics(self) -> Optional[BrowserProcessMetrics]:
         """Get metrics for the qutebrowser process."""
+        if not PSUTIL_AVAILABLE:
+            log.misc.warning("psutil not available for browser process metrics")
+            return None
+            
         try:
             current_pid = os.getpid()
+            if not psutil:
+                return None
             process = psutil.Process(current_pid)
             
             # Get process metrics
@@ -185,7 +247,7 @@ class PerformanceTools:
             )
             
         except Exception as e:
-            print(f"Error getting browser process metrics: {e}")
+            log.misc.error(f"Error getting browser process metrics: {e}")
             return None
     
     def get_tab_performance_metrics(self, window_id: int = 0) -> List[TabPerformanceMetrics]:
@@ -196,25 +258,25 @@ class PerformanceTools:
                 return []
                 
             tabs_metrics = []
-            for i in range(browser.count()):
-                tab = browser.widget(i)
+            for i in range(browser.widget.count()):
+                tab = browser.widget.widget(i)
                 if not tab:
                     continue
                     
                 # Get basic tab info
-                url = tab.url().toString() if tab.url() else ""
+                url = ""
+                try:
+                    if hasattr(tab, 'url') and tab.url():
+                        url = tab.url().toString()
+                except:
+                    pass
                 
-                # These metrics would need to be implemented with actual measurement
-                # For now, return placeholder values
-                load_time = None
-                memory_usage = None
-                render_time = None
-                network_requests = None
-                javascript_execution_time = None
-                
-                # Example of how to implement actual metrics:
-                # load_time = tab.load_time if hasattr(tab, 'load_time') else None
-                # memory_usage = tab.memory_usage if hasattr(tab, 'memory_usage') else None
+                # Implement actual performance metrics collection
+                load_time = self._get_tab_load_time(tab)
+                memory_usage = self._estimate_tab_memory_usage(tab)
+                render_time = self._get_tab_render_time(tab)
+                network_requests = self._count_network_requests(tab)
+                javascript_execution_time = self._get_js_execution_time(tab)
                 
                 tab_metrics = TabPerformanceMetrics(
                     tab_index=i,
@@ -230,8 +292,221 @@ class PerformanceTools:
             return tabs_metrics
             
         except Exception as e:
-            print(f"Error getting tab performance metrics: {e}")
+            log.misc.error(f"Error getting tab performance metrics: {e}")
             return []
+    
+    def _get_tab_load_time(self, tab) -> Optional[float]:
+        """Estimate tab load time using JavaScript performance API."""
+        try:
+            if not hasattr(tab, 'page'):
+                return None
+                
+            # Use Navigation Timing API to get actual load time
+            js_code = """
+            (function() {
+                if (window.performance && window.performance.timing) {
+                    var timing = window.performance.timing;
+                    var loadTime = timing.loadEventEnd - timing.navigationStart;
+                    return loadTime > 0 ? loadTime / 1000 : null; // Convert to seconds
+                }
+                return null;
+            })();
+            """
+            
+            result = self._execute_js_safely(tab, js_code)
+            return float(result) if result and isinstance(result, (int, float)) else None
+            
+        except Exception as e:
+            log.misc.debug(f"Error getting tab load time: {e}")
+            return None
+    
+    def _estimate_tab_memory_usage(self, tab) -> Optional[int]:
+        """Estimate tab memory usage."""
+        try:
+            # Use JavaScript to get memory information if available
+            js_code = """
+            (function() {
+                // Try to get memory info from performance API
+                if (window.performance && window.performance.memory) {
+                    return {
+                        usedJSHeapSize: window.performance.memory.usedJSHeapSize,
+                        totalJSHeapSize: window.performance.memory.totalJSHeapSize,
+                        jsHeapSizeLimit: window.performance.memory.jsHeapSizeLimit
+                    };
+                }
+                
+                // Fallback: estimate based on DOM complexity
+                var elements = document.querySelectorAll('*').length;
+                var images = document.querySelectorAll('img').length;
+                var scripts = document.querySelectorAll('script').length;
+                
+                // Rough estimation (in bytes)
+                var estimatedMemory = (elements * 1000) + (images * 50000) + (scripts * 10000);
+                
+                return {
+                    estimatedMemory: estimatedMemory,
+                    elements: elements,
+                    images: images,
+                    scripts: scripts
+                };
+            })();
+            """
+            
+            result = self._execute_js_safely(tab, js_code)
+            if result and isinstance(result, dict):
+                if 'usedJSHeapSize' in result:
+                    return result['usedJSHeapSize']
+                elif 'estimatedMemory' in result:
+                    return result['estimatedMemory']
+                    
+            return None
+            
+        except Exception as e:
+            log.misc.debug(f"Error estimating tab memory usage: {e}")
+            return None
+    
+    def _get_tab_render_time(self, tab) -> Optional[float]:
+        """Get tab render time using Performance API."""
+        try:
+            js_code = """
+            (function() {
+                if (window.performance && window.performance.timing) {
+                    var timing = window.performance.timing;
+                    if (timing.domContentLoadedEventEnd > 0 && timing.navigationStart > 0) {
+                        return (timing.domContentLoadedEventEnd - timing.navigationStart) / 1000;
+                    }
+                }
+                
+                // Fallback: use DOMContentLoaded timing if available
+                if (window.performance && window.performance.getEntriesByType) {
+                    var navigationEntries = window.performance.getEntriesByType('navigation');
+                    if (navigationEntries.length > 0) {
+                        var entry = navigationEntries[0];
+                        return entry.domContentLoadedEventEnd - entry.domContentLoadedEventStart;
+                    }
+                }
+                
+                return null;
+            })();
+            """
+            
+            result = self._execute_js_safely(tab, js_code)
+            return float(result) if result and isinstance(result, (int, float)) else None
+            
+        except Exception as e:
+            log.misc.debug(f"Error getting tab render time: {e}")
+            return None
+    
+    def _count_network_requests(self, tab) -> Optional[int]:
+        """Count network requests using Resource Timing API."""
+        try:
+            js_code = """
+            (function() {
+                if (window.performance && window.performance.getEntriesByType) {
+                    var resources = window.performance.getEntriesByType('resource');
+                    return resources.length;
+                }
+                
+                // Fallback: count common resource elements
+                var images = document.querySelectorAll('img[src]').length;
+                var scripts = document.querySelectorAll('script[src]').length;
+                var stylesheets = document.querySelectorAll('link[rel="stylesheet"]').length;
+                var iframes = document.querySelectorAll('iframe[src]').length;
+                
+                return images + scripts + stylesheets + iframes + 1; // +1 for the main document
+            })();
+            """
+            
+            result = self._execute_js_safely(tab, js_code)
+            return int(result) if result and isinstance(result, (int, float)) else None
+            
+        except Exception as e:
+            log.misc.debug(f"Error counting network requests: {e}")
+            return None
+    
+    def _get_js_execution_time(self, tab) -> Optional[float]:
+        """Estimate JavaScript execution time."""
+        try:
+            js_code = """
+            (function() {
+                if (window.performance && window.performance.getEntriesByType) {
+                    var measures = window.performance.getEntriesByType('measure');
+                    var marks = window.performance.getEntriesByType('mark');
+                    
+                    // Sum up measure durations as a rough estimate
+                    var totalTime = 0;
+                    for (var i = 0; i < measures.length; i++) {
+                        totalTime += measures[i].duration;
+                    }
+                    
+                    return totalTime > 0 ? totalTime / 1000 : null; // Convert to seconds
+                }
+                
+                // Fallback: estimate based on script count and complexity
+                var scripts = document.querySelectorAll('script').length;
+                var inlineScripts = document.querySelectorAll('script:not([src])').length;
+                
+                // Very rough estimation (milliseconds)
+                var estimatedTime = (scripts * 10) + (inlineScripts * 5);
+                return estimatedTime > 0 ? estimatedTime / 1000 : null;
+            })();
+            """
+            
+            result = self._execute_js_safely(tab, js_code)
+            return float(result) if result and isinstance(result, (int, float)) else None
+            
+        except Exception as e:
+            log.misc.debug(f"Error getting JS execution time: {e}")
+            return None
+    
+    def _execute_js_safely(self, tab, js_code: str):
+        """Execute JavaScript safely on the given tab (similar to page_content_tools)."""
+        try:
+            if not tab:
+                return None
+                
+            if hasattr(tab, 'run_js_async'):
+                result = {'value': None, 'completed': False}
+                
+                def callback(js_result):
+                    result['value'] = js_result
+                    result['completed'] = True
+                
+                tab.run_js_async(js_code, callback)
+                
+                # Wait for result with timeout
+                import time
+                timeout = 1.0  # 1 second for performance metrics
+                start_time = time.time()
+                while not result['completed'] and (time.time() - start_time) < timeout:
+                    time.sleep(0.01)
+                
+                return result['value'] if result['completed'] else None
+                
+            elif hasattr(tab, 'page') and hasattr(tab.page(), 'runJavaScript'):
+                page = tab.page()
+                result = {'value': None, 'completed': False}
+                
+                def js_callback(js_result):
+                    result['value'] = js_result
+                    result['completed'] = True
+                
+                page.runJavaScript(js_code, js_callback)
+                
+                # Wait for result
+                import time
+                timeout = 1.0
+                start_time = time.time()
+                while not result['completed'] and (time.time() - start_time) < timeout:
+                    time.sleep(0.01)
+                
+                return result['value'] if result['completed'] else None
+            
+            return None
+            
+        except Exception as e:
+            log.misc.debug(f"Error executing JavaScript for performance: {e}")
+            return None
     
     def get_network_metrics(self, window_id: int = 0) -> Optional[NetworkMetrics]:
         """Get network-related performance metrics."""
@@ -249,7 +524,7 @@ class PerformanceTools:
             )
             
         except Exception as e:
-            print(f"Error getting network metrics: {e}")
+            log.misc.error(f"Error getting network metrics: {e}")
             return None
     
     def calculate_performance_score(self, system_metrics: SystemMetrics, 
@@ -280,7 +555,7 @@ class PerformanceTools:
             return max(0.0, score)
             
         except Exception as e:
-            print(f"Error calculating performance score: {e}")
+            log.misc.error(f"Error calculating performance score: {e}")
             return 50.0  # Default middle score
     
     def get_performance_snapshot(self, window_id: int = 0) -> PerformanceSnapshot:
@@ -310,7 +585,7 @@ class PerformanceTools:
             return snapshot
             
         except Exception as e:
-            print(f"Error getting performance snapshot: {e}")
+            log.misc.error(f"Error getting performance snapshot: {e}")
             return PerformanceSnapshot(
                 timestamp=datetime.now().isoformat(),
                 system_metrics=None,
@@ -336,7 +611,7 @@ class PerformanceTools:
             return trends
             
         except Exception as e:
-            print(f"Error getting performance trends: {e}")
+            log.misc.error(f"Error getting performance trends: {e}")
             return []
     
     def get_resource_usage_summary(self, window_id: int = 0) -> Dict[str, Any]:
@@ -382,7 +657,7 @@ class PerformanceTools:
             return summary
             
         except Exception as e:
-            print(f"Error getting resource usage summary: {e}")
+            log.misc.error(f"Error getting resource usage summary: {e}")
             return {'error': str(e), 'timestamp': datetime.now().isoformat()}
 
 

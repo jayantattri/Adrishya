@@ -43,6 +43,25 @@ except ImportError as e:
     class SystemMetrics: pass
     class BrowserProcessMetrics: pass
     class PerformanceSnapshot: pass
+    
+    # Create placeholder tools classes
+    class BrowserStateTools:
+        def get_current_tab_info(self, *args): return None
+        def get_all_tabs_info(self, *args): return []
+        def get_window_state(self, *args): return None
+        def get_navigation_state(self, *args): return None
+        def get_browser_metrics(self, *args): return None
+        
+    class PageContentTools:
+        def get_comprehensive_page_content(self, *args): return None
+        
+    class PerformanceTools:
+        def get_performance_snapshot(self, *args): 
+            return PerformanceSnapshot()
+        def get_resource_usage_summary(self, *args): 
+            return {'error': 'Performance tools not available'}
+        def get_system_metrics(self, *args): 
+            return None
 
 
 @dataclass
@@ -135,8 +154,7 @@ class UnifiedBrowserStateTools:
             print(f"Error getting complete browser state: {e}")
             return CompleteBrowserState(
                 timestamp=datetime.now().isoformat(),
-                window_id=window_id,
-                error=str(e)
+                window_id=window_id
             )
     
     def get_browser_overview(self, window_id: int = 0) -> Dict[str, Any]:
