@@ -42,7 +42,18 @@ except ImportError as e:
     class PageContent: pass
     class SystemMetrics: pass
     class BrowserProcessMetrics: pass
-    class PerformanceSnapshot: pass
+    @dataclass
+    class PerformanceSnapshot:
+        timestamp: str = ""
+        system_metrics: Optional[Any] = None
+        browser_process: Optional[Any] = None
+        tab_performance: List[Any] = None
+        network_metrics: Optional[Any] = None
+        overall_score: Optional[float] = None
+        
+        def __post_init__(self):
+            if self.tab_performance is None:
+                self.tab_performance = []
     
     # Create placeholder tools classes
     class BrowserStateTools:
@@ -57,7 +68,14 @@ except ImportError as e:
         
     class PerformanceTools:
         def get_performance_snapshot(self, *args): 
-            return PerformanceSnapshot()
+            return PerformanceSnapshot(
+                timestamp=datetime.now().isoformat(),
+                system_metrics=None,
+                browser_process=None,
+                tab_performance=[],
+                network_metrics=None,
+                overall_score=None
+            )
         def get_resource_usage_summary(self, *args): 
             return {'error': 'Performance tools not available'}
         def get_system_metrics(self, *args): 

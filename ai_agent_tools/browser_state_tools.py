@@ -138,13 +138,38 @@ class BrowserStateTools:
             
             # Try to get from object registry
             if not objreg:
+                log.misc.debug("objreg not available")
                 return None
-            browser = objreg.get('tabbed-browser', scope='window', window=window_id)
+                
+            # Try multiple approaches to get the browser
+            browser = None
+            
+            # First try with specific window_id
+            try:
+                browser = objreg.get('tabbed-browser', scope='window', window=window_id)
+                log.misc.debug(f"Got browser for window {window_id}")
+            except Exception as e:
+                log.misc.debug(f"Could not get browser for window {window_id}: {e}")
+                
+                # Try with current window
+                try:
+                    browser = objreg.get('tabbed-browser', scope='window', window='current')
+                    log.misc.debug("Got browser for current window")
+                except Exception as e:
+                    log.misc.debug(f"Could not get current window browser: {e}")
+                    
+                    # Try with last-focused window
+                    try:
+                        browser = objreg.get('tabbed-browser', scope='window', window='last-focused')
+                        log.misc.debug("Got browser for last-focused window")
+                    except Exception as e:
+                        log.misc.debug(f"Could not get last-focused window browser: {e}")
+            
             if browser:
                 self._browsers[window_id] = browser
                 return browser
             else:
-                log.misc.warning(f"No browser found for window_id: {window_id}")
+                log.misc.debug(f"No browser found for window_id: {window_id}")
                 return None
                 
         except Exception as e:

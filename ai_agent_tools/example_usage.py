@@ -10,34 +10,70 @@ import time
 from typing import Dict, Any
 
 # Import the unified tools
-from unified_state_tools import (
-    get_complete_browser_state,
-    get_browser_overview,
-    get_tab_summary,
-    get_performance_summary,
-    get_page_content_summary,
-    get_quick_status
-)
+try:
+    from .unified_state_tools import (
+        get_complete_browser_state,
+        get_browser_overview,
+        get_tab_summary,
+        get_performance_summary,
+        get_page_content_summary,
+        get_quick_status
+    )
+except ImportError:
+    # Fallback for when running as script
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from unified_state_tools import (
+        get_complete_browser_state,
+        get_browser_overview,
+        get_tab_summary,
+        get_performance_summary,
+        get_page_content_summary,
+        get_quick_status
+    )
 
 # Import individual tools for specific use cases
-from browser_state_tools import (
-    get_current_tab_info,
-    get_all_tabs_info,
-    get_window_state,
-    get_navigation_state
-)
+try:
+    from .browser_state_tools import (
+        get_current_tab_info,
+        get_all_tabs_info,
+        get_window_state,
+        get_navigation_state
+    )
+except ImportError:
+    from browser_state_tools import (
+        get_current_tab_info,
+        get_all_tabs_info,
+        get_window_state,
+        get_navigation_state
+    )
 
-from page_content_tools import (
-    get_page_text_content,
-    get_page_links,
-    get_page_forms
-)
+try:
+    from .page_content_tools import (
+        get_page_text_content,
+        get_page_links,
+        get_page_forms
+    )
+except ImportError:
+    from page_content_tools import (
+        get_page_text_content,
+        get_page_links,
+        get_page_forms
+    )
 
-from performance_tools import (
-    get_system_metrics,
-    get_browser_process_metrics,
-    get_performance_snapshot
-)
+try:
+    from .performance_tools import (
+        get_system_metrics,
+        get_browser_process_metrics,
+        get_performance_snapshot
+    )
+except ImportError:
+    from performance_tools import (
+        get_system_metrics,
+        get_browser_process_metrics,
+        get_performance_snapshot
+    )
 
 
 def print_json(data: Dict[str, Any], title: str = ""):
