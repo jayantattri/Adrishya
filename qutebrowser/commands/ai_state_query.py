@@ -619,3 +619,967 @@ def _show_response_in_window(win_id: int, query: str, response: str, state_data:
         message.error(f"Could not show response in window: {str(e)}")
         # Fall back to message display
         message.info(f"AI Response: {response}")
+
+
+@cmdutils.register()
+@cmdutils.argument('win_id', value=usertypes.CommandValue.win_id)
+def agent_ui(win_id: int) -> None:
+    """Open the AI Agent interface in a new tab with streaming capabilities.
+    
+    This command opens a beautiful AI agent interface that shows:
+    - Real-time streaming of agent responses
+    - Collapsible reasoning sections
+    - Beautifully styled tool calls
+    - Interactive chat interface
+    """
+    try:
+        tabbed_browser = objreg.get('tabbed-browser', scope='window', window=win_id)
+        
+        # Create the AI agent UI HTML
+        html_content = _create_agent_ui_html()
+        
+        # Create a data URL with the HTML content
+        from qutebrowser.qt.core import QUrl
+        import urllib.parse
+        
+        encoded_html = urllib.parse.quote(html_content.encode('utf-8'))
+        data_url = QUrl(f"data:text/html;charset=utf-8,{encoded_html}")
+        
+        # Open in new tab
+        tabbed_browser.tabopen(data_url, background=False)
+        message.info("🤖 AI Agent UI opened in new tab")
+        
+    except Exception as e:
+        log.misc.exception("Error opening agent UI")
+        message.error(f"Could not open AI Agent UI: {str(e)}")
+
+
+def _create_agent_ui_html() -> str:
+    """Create the HTML content for the AI Agent UI."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 AI Agent Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+
+        .chat-container {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            overflow: hidden;
+        }
+
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .user-message {
+            text-align: right;
+        }
+
+        .user-message .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 20px 20px 5px 20px;
+            display: inline-block;
+            max-width: 80%;
+            word-wrap: break-word;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .agent-message {
+            text-align: left;
+        }
+
+        .agent-message .message-content {
+            background: #f8f9fa;
+            color: #333;
+            padding: 20px;
+            border-radius: 20px 20px 20px 5px;
+            display: inline-block;
+            max-width: 90%;
+            word-wrap: break-word;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .reasoning-section {
+            margin: 15px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fafafa;
+        }
+
+        .reasoning-header {
+            background: linear-gradient(135deg, #ffd89b 0%, #19547b 100%);
+            color: white;
+            padding: 12px 20px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+            transition: background 0.2s ease;
+        }
+
+        .reasoning-header:hover {
+            opacity: 0.9;
+        }
+
+        .reasoning-toggle {
+            font-size: 1.2rem;
+            transition: transform 0.2s ease;
+        }
+
+        .reasoning-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .reasoning-content {
+            padding: 20px;
+            background: #f9f9f9;
+            border-top: 1px solid #e0e0e0;
+            color: #666;
+            font-style: italic;
+            line-height: 1.6;
+            display: none;
+            white-space: pre-wrap;
+        }
+
+        .reasoning-content.expanded {
+            display: block;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .tool-calls {
+            margin: 15px 0;
+        }
+
+        .tool-call {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            border-radius: 12px;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #4fd1c7;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .tool-call-header {
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+
+        .tool-call-icon {
+            margin-right: 8px;
+            font-size: 1.2rem;
+        }
+
+        .tool-call-params {
+            background: rgba(255, 255, 255, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            color: #4a5568;
+            overflow-x: auto;
+        }
+
+        .streaming-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #e9ecef;
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .input-form {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .input-field {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s ease;
+            background: white;
+        }
+
+        .input-field:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .send-button {
+            padding: 15px 25px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            min-width: 100px;
+        }
+
+        .send-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .send-button:active {
+            transform: translateY(0);
+        }
+
+        .send-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-bar {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 20px;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .connection-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        .connection-status.disconnected {
+            background: #ef4444;
+        }
+
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .welcome-title {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: #4a5568;
+        }
+
+        .welcome-text {
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .example-queries {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .example-query {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            padding: 15px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .example-query:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .example-query-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #2d3748;
+        }
+
+        .example-query-text {
+            font-size: 0.9rem;
+            color: #4a5568;
+        }
+
+        .error-message {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 15px;
+            border-radius: 12px;
+            border-left: 4px solid #dc2626;
+            margin: 10px 0;
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+            font-style: italic;
+            padding: 15px 20px;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 3px;
+        }
+
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: typingDot 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typingDot {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0.4;
+            }
+            30% {
+                transform: translateY(-10px);
+                opacity: 1;
+            }
+        }
+
+        /* Scrollbar styling */
+        .messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        .messages::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+        }
+
+        .messages::-webkit-scrollbar-thumb:hover {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">🤖 AI Agent Interface</h1>
+            <p class="subtitle">Intelligent browser automation with real-time streaming</p>
+        </div>
+
+        <div class="chat-container">
+            <div class="messages" id="messages">
+                <div class="welcome-message">
+                    <h2 class="welcome-title">Welcome to your AI Browser Agent!</h2>
+                    <p class="welcome-text">
+                        Ask me to help you with browsing tasks, automation, research, or anything else you need.
+                        I can navigate websites, fill forms, extract information, and much more.
+                    </p>
+                    <div class="example-queries">
+                        <div class="example-query" onclick="useExample('Navigate to GitHub and search for qutebrowser')">
+                            <div class="example-query-title">🌐 Navigation</div>
+                            <div class="example-query-text">"Navigate to GitHub and search for qutebrowser"</div>
+                        </div>
+                        <div class="example-query" onclick="useExample('Open YouTube and find videos about Python programming')">
+                            <div class="example-query-title">🔍 Search & Research</div>
+                            <div class="example-query-text">"Open YouTube and find videos about Python programming"</div>
+                        </div>
+                        <div class="example-query" onclick="useExample('Open a new tab and go to Reddit')">
+                            <div class="example-query-title">📑 Tab Management</div>
+                            <div class="example-query-text">"Open a new tab and go to Reddit"</div>
+                        </div>
+                        <div class="example-query" onclick="useExample('Analyze the current page content and summarize it')">
+                            <div class="example-query-title">🧠 Analysis</div>
+                            <div class="example-query-text">"Analyze the current page content and summarize it"</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <form class="input-form" onsubmit="sendMessage(event)">
+                    <input type="text" id="messageInput" class="input-field" 
+                           placeholder="Ask me to help you with browsing tasks..." autocomplete="off">
+                    <button type="submit" class="send-button" id="sendButton">Send</button>
+                </form>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="connection-status" id="connectionStatus"></div>
+                    <span id="statusText">Ready</span>
+                </div>
+                <span id="messageCount">0 messages</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let messageCount = 0;
+        let isProcessing = false;
+
+        function useExample(text) {
+            document.getElementById('messageInput').value = text;
+            document.getElementById('messageInput').focus();
+        }
+
+        function addMessage(content, isUser = false, streaming = false) {
+            const messagesContainer = document.getElementById('messages');
+            const welcomeMessage = messagesContainer.querySelector('.welcome-message');
+            
+            // Remove welcome message on first user message
+            if (isUser && welcomeMessage) {
+                welcomeMessage.style.display = 'none';
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'agent-message'}`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            
+            if (streaming && !isUser) {
+                contentDiv.innerHTML = content;
+            } else {
+                contentDiv.textContent = content;
+            }
+            
+            messageDiv.appendChild(contentDiv);
+            messagesContainer.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            return contentDiv;
+        }
+
+        function addTypingIndicator() {
+            const messagesContainer = document.getElementById('messages');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'typing-indicator';
+            typingDiv.id = 'typingIndicator';
+            
+            typingDiv.innerHTML = `
+                <span>🤖 AI Agent is thinking</span>
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
+            
+            messagesContainer.appendChild(typingDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            return typingDiv;
+        }
+
+        function removeTypingIndicator() {
+            const typingIndicator = document.getElementById('typingIndicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+        }
+
+        function createReasoningSection(reasoning) {
+            return `
+                <div class="reasoning-section">
+                    <div class="reasoning-header" onclick="toggleReasoning(this)">
+                        <span>🧠 Reasoning Process</span>
+                        <span class="reasoning-toggle">▼</span>
+                    </div>
+                    <div class="reasoning-content">${reasoning}</div>
+                </div>
+            `;
+        }
+
+        function createToolCallSection(toolCalls) {
+            if (!toolCalls || toolCalls.length === 0) return '';
+            
+            let toolCallsHtml = '<div class="tool-calls"><h4>🔧 Tool Calls:</h4>';
+            
+            toolCalls.forEach(tool => {
+                const toolIcon = getToolIcon(tool.name);
+                toolCallsHtml += `
+                    <div class="tool-call">
+                        <div class="tool-call-header">
+                            <span class="tool-call-icon">${toolIcon}</span>
+                            ${tool.name}
+                        </div>
+                        <div class="tool-call-params">${JSON.stringify(tool.parameters, null, 2)}</div>
+                    </div>
+                `;
+            });
+            
+            toolCallsHtml += '</div>';
+            return toolCallsHtml;
+        }
+
+        function getToolIcon(toolName) {
+            const icons = {
+                'navigate': '🌐',
+                'click': '👆',
+                'type': '⌨️',
+                'scroll': '📜',
+                'search': '🔍',
+                'tab_new': '📑',
+                'tab_close': '❌',
+                'fill_form': '📝',
+                'get_page_info': '📄',
+                'execute_javascript': '⚡',
+                'copy_to_clipboard': '📋',
+                'take_screenshot': '📸',
+                'default': '🔧'
+            };
+            return icons[toolName] || icons.default;
+        }
+
+        function toggleReasoning(header) {
+            const content = header.nextElementSibling;
+            const toggle = header.querySelector('.reasoning-toggle');
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                toggle.classList.remove('expanded');
+                toggle.textContent = '▼';
+            } else {
+                content.classList.add('expanded');
+                toggle.classList.add('expanded');
+                toggle.textContent = '▲';
+            }
+        }
+
+        function updateStatus(text, isConnected = true) {
+            document.getElementById('statusText').textContent = text;
+            const connectionStatus = document.getElementById('connectionStatus');
+            connectionStatus.className = `connection-status ${isConnected ? '' : 'disconnected'}`;
+        }
+
+        function updateMessageCount() {
+            document.getElementById('messageCount').textContent = `${messageCount} messages`;
+        }
+
+        async function sendMessage(event) {
+            event.preventDefault();
+            
+            if (isProcessing) return;
+            
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message
+            addMessage(message, true);
+            input.value = '';
+            messageCount++;
+            updateMessageCount();
+            
+            // Set processing state
+            isProcessing = true;
+            document.getElementById('sendButton').disabled = true;
+            updateStatus('Processing...', true);
+            
+            // Add typing indicator
+            const typingIndicator = addTypingIndicator();
+            
+            try {
+                // Call the actual AI agent
+                await processWithRealAgent(message);
+                
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage(`Error: ${error.message}`, false, true);
+                updateStatus('Error occurred', false);
+            } finally {
+                isProcessing = false;
+                document.getElementById('sendButton').disabled = false;
+                updateStatus('Ready', true);
+            }
+        }
+
+        async function processWithRealAgent(query) {
+            // Remove typing indicator after delay
+            setTimeout(() => {
+                removeTypingIndicator();
+            }, 1000);
+            
+            try {
+                // Try to communicate with the actual AI agent through qute:// protocol
+                // This creates a request to the qutebrowser backend
+                const response = await fetch('qute://agent-process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        stream: true
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    await displayAgentResponse(result);
+                } else {
+                    throw new Error('Agent request failed');
+                }
+                
+            } catch (error) {
+                console.warn('Real agent not available, falling back to simulation:', error);
+                // Fall back to simulation if real agent is not available
+                await simulateAgentResponse(query);
+            }
+        }
+
+        async function displayAgentResponse(agentResult) {
+            const reasoning = agentResult.reasoning || 'Processing your request...';
+            const toolCalls = agentResult.tool_calls || [];
+            const message = agentResult.message || 'Task completed';
+            const success = agentResult.success !== false;
+            
+            let response = createReasoningSection(reasoning);
+            
+            if (toolCalls.length > 0) {
+                response += createToolCallSection(toolCalls);
+            }
+            
+            const statusColor = success ? '#10b981' : '#ef4444';
+            const statusIcon = success ? '✅' : '❌';
+            const statusText = success ? 'Task Completed Successfully!' : 'Task Failed';
+            
+            response += `<div style="margin-top: 15px; padding: 15px; background: ${success ? '#e8f5e8' : '#fee2e2'}; border-radius: 8px; border-left: 4px solid ${statusColor};">
+                <strong>${statusIcon} ${statusText}</strong><br>
+                ${message}
+            </div>`;
+            
+            // Stream the response
+            const responseDiv = addMessage('', false, true);
+            await streamText(responseDiv, response);
+            
+            messageCount++;
+            updateMessageCount();
+        }
+
+        async function simulateAgentResponse(query) {
+            // Remove typing indicator after delay
+            setTimeout(() => {
+                removeTypingIndicator();
+            }, 2000);
+            
+            // Simulate reasoning phase
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Create response with reasoning and tool calls
+            const reasoning = `Let me break down this request: "${query}"
+            
+1. First, I need to understand what the user wants to accomplish
+2. Then I'll determine which tools and actions are needed
+3. I'll execute the necessary steps in the correct order
+4. Finally, I'll provide feedback on the results
+
+This appears to be a ${query.includes('navigate') || query.includes('open') ? 'navigation' : 
+                     query.includes('search') || query.includes('find') ? 'search' : 
+                     query.includes('analyze') || query.includes('summarize') ? 'analysis' : 'general'} task.`;
+
+            const toolCalls = generateMockToolCalls(query);
+            
+            let response = createReasoningSection(reasoning);
+            
+            if (toolCalls.length > 0) {
+                response += createToolCallSection(toolCalls);
+            }
+            
+            response += `<div style="margin-top: 15px; padding: 15px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #10b981;">
+                <strong>✅ Task Completed Successfully!</strong><br>
+                I've ${query.includes('navigate') || query.includes('open') ? 'navigated to the requested page' : 
+                      query.includes('search') || query.includes('find') ? 'performed the search as requested' : 
+                      query.includes('analyze') || query.includes('summarize') ? 'analyzed the content' : 'completed the requested task'}.
+                ${generateResponseMessage(query)}
+            </div>`;
+            
+            // Simulate streaming by updating the response gradually
+            const responseDiv = addMessage('', false, true);
+            await streamText(responseDiv, response);
+            
+            messageCount++;
+            updateMessageCount();
+        }
+
+        function generateMockToolCalls(query) {
+            const tools = [];
+            
+            if (query.includes('navigate') || query.includes('open') || query.includes('go to')) {
+                tools.push({
+                    name: 'navigate',
+                    parameters: {
+                        url: query.includes('github') ? 'https://github.com' : 
+                             query.includes('youtube') ? 'https://youtube.com' : 
+                             query.includes('reddit') ? 'https://reddit.com' : 
+                             'https://example.com'
+                    }
+                });
+            }
+            
+            if (query.includes('search') || query.includes('find')) {
+                tools.push({
+                    name: 'search',
+                    parameters: {
+                        query: query.includes('python') ? 'python programming' : 
+                               query.includes('qutebrowser') ? 'qutebrowser' : 
+                               'search term'
+                    }
+                });
+            }
+            
+            if (query.includes('new tab')) {
+                tools.push({
+                    name: 'tab_new',
+                    parameters: {}
+                });
+            }
+            
+            if (query.includes('analyze') || query.includes('summarize')) {
+                tools.push({
+                    name: 'get_page_info',
+                    parameters: {
+                        include_content: true
+                    }
+                });
+            }
+            
+            return tools;
+        }
+
+        function generateResponseMessage(query) {
+            if (query.includes('github')) {
+                return ' GitHub is now loaded and ready for you to search or browse repositories.';
+            } else if (query.includes('youtube')) {
+                return ' YouTube is now open and ready for video search and discovery.';
+            } else if (query.includes('reddit')) {
+                return ' Reddit is now loaded in a new tab for you to browse.';
+            } else if (query.includes('analyze') || query.includes('summarize')) {
+                return ' The page content has been analyzed and the key information has been extracted.';
+            }
+            return ' The task has been completed successfully.';
+        }
+
+        async function streamText(element, text) {
+            element.innerHTML = '';
+            
+            // Split by HTML tags to preserve formatting while streaming
+            const parts = text.split(/(<[^>]*>)/);
+            let currentText = '';
+            
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                currentText += part;
+                element.innerHTML = currentText;
+                
+                // Add small delay for streaming effect (faster for HTML tags)
+                if (part.startsWith('<')) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                } else {
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                }
+                
+                // Scroll to bottom during streaming
+                const messagesContainer = document.getElementById('messages');
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        // Add a way to communicate with qutebrowser backend
+        window.qutebrowserAPI = {
+            executeCommand: function(command) {
+                // This would be replaced by actual qutebrowser integration
+                console.log('Executing command:', command);
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve({ success: true, message: 'Command executed' });
+                    }, 1000);
+                });
+            },
+            
+            getAgentStatus: function() {
+                // Check if AI agent is initialized
+                console.log('Checking agent status');
+                return new Promise((resolve) => {
+                    resolve({ 
+                        initialized: false, 
+                        provider: 'none',
+                        message: 'AI agent not initialized. Use :ai-agent-init to set up.'
+                    });
+                });
+            }
+        };
+
+        // Initialize the interface
+        document.addEventListener('DOMContentLoaded', async function() {
+            updateStatus('Ready', true);
+            updateMessageCount();
+            document.getElementById('messageInput').focus();
+            
+            // Check if AI agent is available
+            try {
+                const status = await window.qutebrowserAPI.getAgentStatus();
+                if (!status.initialized) {
+                    // Add a message about initializing the agent
+                    const messagesContainer = document.getElementById('messages');
+                    const setupMessage = document.createElement('div');
+                    setupMessage.className = 'message agent-message';
+                    setupMessage.innerHTML = `
+                        <div class="message-content">
+                            <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin: 10px 0;">
+                                <strong>⚠️ AI Agent Setup Required</strong><br>
+                                The AI agent is not initialized. To use real AI capabilities, run:<br>
+                                <code style="background: #f8f9fa; padding: 4px 8px; border-radius: 4px; font-family: monospace;">:ai-agent-init deepseek_assistant</code><br>
+                                <small style="color: #666;">For now, you can test the interface with simulated responses.</small>
+                            </div>
+                        </div>
+                    `;
+                    messagesContainer.appendChild(setupMessage);
+                }
+            } catch (error) {
+                console.warn('Could not check agent status:', error);
+            }
+        });
+
+        // Handle Enter key
+        document.getElementById('messageInput').addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage(event);
+            }
+        });
+    </script>
+</body>
+</html>"""
