@@ -73,6 +73,28 @@
         "local_processing"
       ]
     },
+    "deepseek_assistant": {
+      "name": "DeepSeek AI Assistant",
+      "description": "Powerful assistant using DeepSeek R1 14B model via Ollama",
+      "llm_provider": "ollama",
+      "model": "deepseek-r1:14b",
+      "api_base": "http://localhost:11434",
+      "temperature": 0.1,
+      "max_tokens": 15000,
+      "max_tool_calls": 12,
+      "timeout": 300,
+      "personality": "intelligent and efficient",
+      "capabilities": [
+        "navigation",
+        "tab_management",
+        "page_interaction",
+        "form_filling",
+        "information_extraction",
+        "automation",
+        "workflow_automation",
+        "search_optimization"
+      ]
+    },
     "quick_helper": {
       "name": "Quick Helper",
       "description": "Fast responses for simple browser tasks",
@@ -139,7 +161,10 @@
         "mistral",
         "mixtral",
         "codellama",
-        "dolphin-mistral"
+        "dolphin-mistral",
+        "deepseek-r1:14b",
+        "deepseek-coder:33b",
+        "deepseek-coder:6.7b"
       ],
       "requires_api_key": false,
       "api_key_env": null,

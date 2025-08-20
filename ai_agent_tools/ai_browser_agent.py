@@ -63,6 +63,7 @@ try:
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
+    print("Warning: requests package not available. Install with: pip install requests")
 
 
 @dataclass
@@ -242,25 +243,24 @@ class OllamaProvider(LLMProvider):
     def __init__(self, config: AgentConfig):
         super().__init__(config)
         if not REQUESTS_AVAILABLE:
-            raise ImportError("requests package not available")
+            raise ImportError("requests package not available. Install with: pip install requests")
         
         self.base_url = config.api_base or "http://localhost:11434"
     
     async def generate_response(self, messages: List[Dict[str, str]], 
                               tools: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Generate response using Ollama API."""
+        """Generate response using Ollama API with reasoning model handling."""
         try:
-            # Ollama doesn't support function calling yet, so we include tools in system prompt
-            tools_text = self._format_tools_for_prompt(tools)
+            # Create a specialized prompt for reasoning models
+            system_prompt = self._create_reasoning_system_prompt(tools)
             
             # Add tools to system message
             enhanced_messages = []
             for msg in messages:
                 if msg["role"] == "system":
-                    enhanced_content = msg["content"] + f"\n\nAvailable tools:\n{tools_text}"
                     enhanced_messages.append({
                         "role": "system", 
-                        "content": enhanced_content
+                        "content": system_prompt
                     })
                 else:
                     enhanced_messages.append(msg)
@@ -283,34 +283,198 @@ class OllamaProvider(LLMProvider):
             response.raise_for_status()
             
             result_data = response.json()
-            content = result_data.get("message", {}).get("content", "")
+            full_content = result_data.get("message", {}).get("content", "")
             
-            # Parse tool calls from content (basic implementation)
-            tool_calls = self._extract_tool_calls_from_content(content)
+            # Separate reasoning from action response
+            reasoning, action_response, tool_calls = self._parse_reasoning_response(full_content)
             
             return {
-                "content": content,
-                "tool_calls": tool_calls
+                "content": action_response,
+                "reasoning": reasoning,
+                "tool_calls": tool_calls,
+                "full_response": full_content
             }
             
         except Exception as e:
             raise Exception(f"Ollama API error: {str(e)}")
     
+    def _create_reasoning_system_prompt(self, tools: List[Dict[str, Any]]) -> str:
+        """Create a system prompt optimized for reasoning models."""
+        tools_text = self._format_tools_for_prompt(tools)
+        
+        prompt = f"""You are an AI browser assistant that controls a real web browser. You have access to browser automation tools.
+
+AVAILABLE BROWSER TOOLS:
+{tools_text}
+
+RESPONSE FORMAT:
+THINKING:
+[Brief reasoning about what the user wants]
+
+ACTION:
+[Simple action plan]
+
+EXECUTE:
+[Tool calls in JSON format, one per line:
+TOOL_CALL: {{"name": "tool_name", "parameters": {{"param": "value"}}}}
+]
+
+CRITICAL RULES:
+- You control a REAL browser - use the tools to perform actions
+- NEVER give manual instructions - always use tools
+- ALWAYS provide the EXECUTE section with actual tool calls
+- For navigation: use open_url
+- For new tabs: use tab_new
+- For searching: use search_page or type_text + send_key
+- For clicking: use click_element
+- For forms: use fill_form
+- For waiting: use wait_for_load
+
+SIMPLE EXAMPLES:
+User: "open google.com"
+THINKING: User wants to navigate to Google's homepage
+ACTION: Open Google.com using open_url tool
+EXECUTE:
+TOOL_CALL: {{"name": "open_url", "parameters": {{"url": "https://www.google.com"}}}}
+
+User: "open youtube.com in a new tab"
+THINKING: User wants to open YouTube in a new tab
+ACTION: Open YouTube in a new tab using tab_new tool
+EXECUTE:
+TOOL_CALL: {{"name": "tab_new", "parameters": {{"url": "https://www.youtube.com"}}}}
+
+User: "search for Python tutorials"
+THINKING: User wants to search for Python tutorials on Google
+ACTION: Open Google and search for Python tutorials
+EXECUTE:
+TOOL_CALL: {{"name": "open_url", "parameters": {{"url": "https://www.google.com"}}}}
+
+User: "click the first result"
+THINKING: User wants to click the first search result
+ACTION: Click the first result on the page
+EXECUTE:
+TOOL_CALL: {{"name": "click_element", "selector_type": "css", "selector_value": "h3"}}
+
+ITERATIVE TOOL CALLING:
+- Call ONE tool at a time
+- Wait for feedback before calling the next tool
+- Use feedback to decide the next step
+- Continue until task is complete
+- If task is complete, respond with "TASK COMPLETE" in your content
+- ALWAYS include the EXECUTE section with actual tool calls
+"""
+        return prompt
+    
+    def _parse_reasoning_response(self, content: str) -> tuple:
+        """Parse reasoning model response to separate thinking from actions."""
+        reasoning = ""
+        action_response = ""
+        tool_calls = []
+        
+        # Split content into sections
+        sections = content.split('\n')
+        current_section = None
+        
+        for line in sections:
+            line = line.strip()
+            
+            if line.startswith('THINKING:'):
+                current_section = 'thinking'
+                continue
+            elif line.startswith('ACTION:'):
+                current_section = 'action'
+                continue
+            elif line.startswith('EXECUTE:'):
+                current_section = 'execute'
+                continue
+            elif line.startswith('TOOL_CALL:'):
+                current_section = 'execute'
+                # Parse tool call
+                try:
+                    tool_data = json.loads(line[10:])  # Remove 'TOOL_CALL:' prefix
+                    tool_calls.append(tool_data)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from the line
+                    try:
+                        # Look for JSON-like content after TOOL_CALL:
+                        json_start = line.find('{')
+                        if json_start != -1:
+                            json_content = line[json_start:]
+                            tool_data = json.loads(json_content)
+                            tool_calls.append(tool_data)
+                    except:
+                        continue
+                continue
+            
+            # Add content to appropriate section
+            if current_section == 'thinking':
+                reasoning += line + '\n'
+            elif current_section == 'action':
+                action_response += line + '\n'
+            elif current_section == 'execute' and not line.startswith('TOOL_CALL:'):
+                action_response += line + '\n'
+        
+        # Clean up whitespace
+        reasoning = reasoning.strip()
+        action_response = action_response.strip()
+        
+        # If no clear sections found, try to extract reasoning from the beginning
+        if not reasoning and not action_response:
+            # Look for reasoning patterns in the full response
+            lines = content.split('\n')
+            reasoning_lines = []
+            action_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                if any(keyword in line.lower() for keyword in ['think', 'reason', 'analyze', 'consider', 'need to', 'should']):
+                    reasoning_lines.append(line)
+                elif any(keyword in line.lower() for keyword in ['open', 'navigate', 'click', 'fill', 'search', 'tool_call']):
+                    action_lines.append(line)
+                elif line.startswith('TOOL_CALL:'):
+                    try:
+                        tool_data = json.loads(line[10:])
+                        tool_calls.append(tool_data)
+                    except json.JSONDecodeError:
+                        # Try to extract JSON from the line
+                        try:
+                            json_start = line.find('{')
+                            if json_start != -1:
+                                json_content = line[json_start:]
+                                tool_data = json.loads(json_content)
+                                tool_calls.append(tool_data)
+                        except:
+                            continue
+            
+            reasoning = '\n'.join(reasoning_lines)
+            action_response = '\n'.join(action_lines)
+        
+        return reasoning, action_response, tool_calls
+    
     def _format_tools_for_prompt(self, tools: List[Dict[str, Any]]) -> str:
         """Format tools for inclusion in prompt."""
         tools_text = ""
         for tool in tools:
-            tools_text += f"- {tool['name']}: {tool['description']}\n"
-            if 'parameters' in tool:
-                tools_text += f"  Parameters: {json.dumps(tool['parameters'], indent=2)}\n"
+            tools_text += f"\n{tool['name']}: {tool['description']}\n"
+            if 'parameters' in tool and 'properties' in tool['parameters']:
+                props = tool['parameters']['properties']
+                if props:
+                    tools_text += "  Parameters: "
+                    param_list = []
+                    for param_name, param_info in props.items():
+                        param_type = param_info.get('type', 'any')
+                        required = param_name in tool['parameters'].get('required', [])
+                        req_text = "*" if required else ""
+                        param_list.append(f"{param_name}{req_text} ({param_type})")
+                    tools_text += ", ".join(param_list) + "\n"
+        
         return tools_text
     
     def _extract_tool_calls_from_content(self, content: str) -> List[Dict[str, Any]]:
-        """Extract tool calls from response content (basic parsing)."""
+        """Extract tool calls from response content (enhanced parsing)."""
         tool_calls = []
         
         # Look for tool call patterns in the response
-        # This is a simple implementation - could be enhanced with better parsing
         lines = content.split('\n')
         for line in lines:
             line = line.strip()
@@ -318,8 +482,28 @@ class OllamaProvider(LLMProvider):
                 try:
                     tool_data = json.loads(line[10:])  # Remove 'TOOL_CALL:' prefix
                     tool_calls.append(tool_data)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Failed to parse tool call '{line}': {e}")
                     continue
+        
+        # If no tool calls found, try to extract from EXECUTE section
+        if not tool_calls:
+            execute_section = False
+            for line in lines:
+                line = line.strip()
+                if line == "EXECUTE:":
+                    execute_section = True
+                    continue
+                elif execute_section and line and not line.startswith(('THINKING:', 'ACTION:')):
+                    # Try to parse as JSON
+                    try:
+                        if line.startswith('TOOL_CALL:'):
+                            tool_data = json.loads(line[10:])
+                        else:
+                            tool_data = json.loads(line)
+                        tool_calls.append(tool_data)
+                    except json.JSONDecodeError:
+                        continue
         
         return tool_calls
 
@@ -474,6 +658,48 @@ Respond naturally and conversationally while using tools to accomplish the user'
         
         return context
     
+    def _build_enhanced_context(self, user_query: str, context: Dict[str, Any]) -> str:
+        """Build enhanced context with clear separation between current request and history."""
+        context_parts = []
+        
+        # Start with clear current request section
+        context_parts.append("🎯 CURRENT USER REQUEST:")
+        context_parts.append(f"   {user_query}")
+        context_parts.append("")
+        
+        # Add current browser state
+        if context.get("browser_state"):
+            browser_state = context["browser_state"]
+            context_parts.append("📍 CURRENT BROWSER STATE:")
+            
+            if browser_state.get("url"):
+                context_parts.append(f"   Current URL: {browser_state['url']}")
+            if browser_state.get("title"):
+                context_parts.append(f"   Page Title: {browser_state['title']}")
+            if browser_state.get("tabs"):
+                context_parts.append(f"   Open Tabs: {len(browser_state['tabs'])}")
+            
+            context_parts.append("")
+        
+        # Add page info if available
+        if context.get("page_info"):
+            page_info = context["page_info"]
+            context_parts.append("📄 CURRENT PAGE INFO:")
+            
+            if page_info.get("title"):
+                context_parts.append(f"   Title: {page_info['title']}")
+            if page_info.get("main_text"):
+                text = page_info["main_text"]
+                context_parts.append(f"   Content Preview: {text[:200]}...")
+            
+            context_parts.append("")
+        
+        # Add clear instruction
+        context_parts.append("⚠️  INSTRUCTION: Focus on the CURRENT REQUEST above. Use browser tools to accomplish this specific task.")
+        context_parts.append("")
+        
+        return "\n".join(context_parts)
+    
     async def process_query(self, user_query: str) -> AgentResponse:
         """Process a natural language query and execute appropriate browser actions.
         
@@ -496,35 +722,86 @@ Respond naturally and conversationally while using tools to accomplish the user'
             # Get current context
             context = self._get_current_context()
             
-            # Prepare messages for LLM
+            # Build enhanced context with clear separation
+            enhanced_context = self._build_enhanced_context(user_query, context)
+            
+            # Prepare messages for LLM with clear current request focus
             messages = [
                 {"role": "system", "content": self._get_system_prompt()},
-                {"role": "user", "content": f"Current browser context: {json.dumps(context, indent=2)}\n\nUser request: {user_query}"}
+                {"role": "user", "content": enhanced_context}
             ]
             
-            # Add conversation history (last 5 exchanges)
+            # Add conversation history with clear separation (last 3 exchanges only)
             if self.conversation_history:
-                recent_history = self.conversation_history[-10:]  # Last 5 exchanges (user + assistant)
-                messages.extend(recent_history)
+                recent_history = self.conversation_history[-6:]  # Last 3 exchanges (user + assistant)
+                # Add history with clear context marker
+                history_context = "\n\n📚 PREVIOUS CONVERSATION (for context only - focus on current request above):\n"
+                for entry in recent_history:
+                    role = entry.get("role", "unknown")
+                    content = entry.get("content", "")
+                    if role == "user":
+                        history_context += f"👤 User: {content}\n"
+                    elif role == "assistant":
+                        # Truncate long assistant responses
+                        short_content = content[:200] + "..." if len(content) > 200 else content
+                        history_context += f"🤖 Assistant: {short_content}\n"
+                
+                history_context += "\n⚠️  REMEMBER: The CURRENT REQUEST above is your priority!"
+                
+                # Add history as a separate message
+                messages.append({"role": "user", "content": history_context})
             
-            # Get LLM response with tool calls
-            llm_response = await self.llm_provider.generate_response(
-                messages=messages,
-                tools=self.tools_config.get("tools", [])
-            )
+            # Execute iterative tool calling - one tool at a time with feedback
+            all_tool_calls = []
+            all_execution_results = []
+            iteration_count = 0
+            max_iterations = min(self.config.max_tool_calls, 5)  # Cap at 5 iterations
             
-            # Execute tool calls
-            execution_results = []
-            if llm_response.get("tool_calls"):
-                execution_results = await self._execute_tool_calls(llm_response["tool_calls"])
+            while iteration_count < max_iterations:
+                iteration_count += 1
+                self.logger.debug(f"Starting iteration {iteration_count}")
+                
+                # Execute single iteration
+                llm_response, new_tool_calls, new_results = await self._execute_single_iteration_with_feedback(
+                    messages, user_query
+                )
+                
+                # Add new results to our tracking
+                all_tool_calls.extend(new_tool_calls)
+                all_execution_results.extend(new_results)
+                
+                # Check if task is complete
+                content = llm_response.get("content", "").lower()
+                if "task complete" in content or "no more tools" in content or "task finished" in content:
+                    self.logger.debug("LLM indicated task is complete")
+                    final_response = llm_response
+                    break
+                
+                # Check if no more tool calls
+                if not new_tool_calls:
+                    self.logger.debug("No more tool calls, task completed")
+                    final_response = llm_response
+                    break
+                
+                # Update messages for next iteration
+                messages = llm_response.get("messages", messages)
+                
+                # Small delay to prevent overwhelming the system
+                await asyncio.sleep(0.5)
             
-            # Create response
+            # If we hit max iterations, use the last response
+            if iteration_count >= max_iterations:
+                self.logger.warning(f"Reached maximum iterations ({max_iterations}), stopping tool execution")
+                final_response = llm_response
+            
+            # Create response with reasoning
             response = AgentResponse(
                 success=True,
-                message=llm_response.get("content", "Task completed"),
-                tool_calls=llm_response.get("tool_calls", []),
-                execution_results=execution_results,
-                thinking=llm_response.get("thinking")
+                message=final_response.get("content", "Task completed"),
+                tool_calls=all_tool_calls,
+                execution_results=all_execution_results,
+                thinking=final_response.get("reasoning"),
+                error=None
             )
             
             # Update conversation history
@@ -549,6 +826,102 @@ Respond naturally and conversationally while using tools to accomplish the user'
                 execution_results=[],
                 error=str(e)
             )
+    
+    async def _execute_single_iteration_with_feedback(self, initial_messages: List[Dict[str, Any]], user_query: str) -> tuple:
+        """Execute a single tool call and return with feedback for the next iteration.
+        
+        This method ensures true iterative execution - one tool at a time.
+        
+        Args:
+            initial_messages: Initial messages for the LLM
+            user_query: Original user query
+            
+        Returns:
+            Tuple of (llm_response, all_tool_calls, all_execution_results)
+        """
+        messages = initial_messages.copy()
+        all_tool_calls = []
+        all_execution_results = []
+        
+        # Get LLM response with potential tool calls
+        llm_response = await self.llm_provider.generate_response(
+            messages=messages,
+            tools=self.tools_config.get("tools", [])
+        )
+        
+        # Debug: Log the full response
+        self.logger.debug(f"LLM Response: {llm_response}")
+        
+        # Check if LLM wants to call tools
+        tool_calls = llm_response.get("tool_calls", [])
+        
+        # If no tool calls in response, try to extract from content
+        if not tool_calls:
+            content = llm_response.get("content", "")
+            tool_calls = self.llm_provider._extract_tool_calls_from_content(content)
+            self.logger.debug(f"Extracted tool calls from content: {tool_calls}")
+        
+        # Check if LLM indicates task is complete
+        content = llm_response.get("content", "").lower()
+        if "task complete" in content or "no more tools" in content or "task finished" in content:
+            self.logger.debug("LLM indicated task is complete")
+            return llm_response, all_tool_calls, all_execution_results
+        
+        if not tool_calls:
+            # No tool calls found - this might be an error
+            self.logger.warning("No tool calls found in LLM response")
+            self.logger.debug(f"Response content: {llm_response.get('content', '')}")
+            
+            # Check if this looks like a simple navigation request that should have a tool call
+            user_query_lower = user_query.lower()
+            if any(keyword in user_query_lower for keyword in ['open', 'go to', 'navigate', 'visit']):
+                self.logger.warning("Navigation request detected but no tool call provided - this indicates a problem")
+                return llm_response, all_tool_calls, all_execution_results
+            
+            # No more tool calls, we're done
+            self.logger.debug("No more tool calls, task completed")
+            return llm_response, all_tool_calls, all_execution_results
+        
+        # Execute ONLY the first tool call - enforce true iterative execution
+        if tool_calls:
+            # Take only the FIRST tool call, ignore any others
+            first_tool_call = tool_calls[0]
+            tool_name = first_tool_call["name"]
+            parameters = first_tool_call.get("parameters", {})
+            
+            # Check if we've already executed this exact tool call
+            tool_call_key = f"{tool_name}:{str(parameters)}"
+            if tool_call_key in [f"{tc['name']}:{str(tc.get('parameters', {}))}" for tc in all_tool_calls]:
+                self.logger.warning(f"Duplicate tool call detected: {tool_call_key}")
+                self.logger.debug("Stopping execution to prevent infinite loops")
+                return llm_response, all_tool_calls, all_execution_results
+            
+            self.logger.debug(f"Executing tool: {tool_name} with parameters: {parameters}")
+            
+            # Execute the tool
+            result = await self._execute_single_tool(tool_name, parameters)
+            
+            # Add to our tracking
+            all_tool_calls.append(first_tool_call)
+            all_execution_results.append(result)
+            
+            # Create feedback message for the LLM
+            feedback_message = self._create_tool_feedback_message(
+                first_tool_call, result, len(all_tool_calls), all_tool_calls, all_execution_results
+            )
+            
+            # Add the feedback to messages for next iteration
+            messages.append({"role": "assistant", "content": f"I executed: {tool_name}({parameters})"})
+            messages.append({"role": "user", "content": feedback_message})
+            
+            # Check if we should continue
+            if not result.success:
+                self.logger.warning(f"Tool {tool_name} failed: {result.error}")
+                # Add error context and continue
+                error_message = f"Tool {tool_name} failed with error: {result.error}. Please try a different approach or provide more specific instructions."
+                messages.append({"role": "user", "content": error_message})
+        
+        return llm_response, all_tool_calls, all_execution_results
     
     async def _execute_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> List[CommandResult]:
         """Execute the tool calls returned by the LLM.
@@ -586,6 +959,62 @@ Respond naturally and conversationally while using tools to accomplish the user'
                 ))
         
         return results
+    
+    def _create_tool_feedback_message(self, tool_call: Dict[str, Any], result: CommandResult, 
+                                     iteration: int, all_tool_calls: List[Dict[str, Any]], 
+                                     all_results: List[CommandResult]) -> str:
+        """Create a feedback message for the LLM after tool execution.
+        
+        Args:
+            tool_call: The tool call that was executed
+            result: The result of the tool execution
+            iteration: Current iteration number
+            all_tool_calls: All tool calls executed so far
+            all_results: All results from previous executions
+            
+        Returns:
+            Feedback message for the LLM
+        """
+        tool_name = tool_call["name"]
+        parameters = tool_call.get("parameters", {})
+        
+        feedback_parts = []
+        feedback_parts.append(f"🔧 TOOL EXECUTION FEEDBACK (Iteration {iteration}):")
+        feedback_parts.append(f"   Tool: {tool_name}")
+        feedback_parts.append(f"   Parameters: {parameters}")
+        
+        if result.success:
+            feedback_parts.append(f"   ✅ Status: SUCCESS")
+            if result.message:
+                feedback_parts.append(f"   📤 Message: {result.message}")
+        else:
+            feedback_parts.append(f"   ❌ Status: FAILED")
+            if result.error:
+                feedback_parts.append(f"   🚨 Error: {result.error}")
+        
+        # Add summary of all previous executions
+        if len(all_tool_calls) > 1:
+            feedback_parts.append("")
+            feedback_parts.append("📋 PREVIOUS TOOL EXECUTIONS:")
+            for i, (prev_call, prev_result) in enumerate(zip(all_tool_calls[:-1], all_results[:-1]), 1):
+                prev_tool = prev_call["name"]
+                prev_success = "✅" if prev_result.success else "❌"
+                feedback_parts.append(f"   {i}. {prev_tool}: {prev_success}")
+        
+        # Add instruction for next step
+        feedback_parts.append("")
+        feedback_parts.append("🎯 NEXT STEP:")
+        if result.success:
+            # Check if this looks like a complete task
+            if tool_name == "open_url" and "url" in parameters:
+                # For simple navigation tasks, suggest completion
+                feedback_parts.append("   Tool executed successfully. If this completes your task, respond with 'TASK COMPLETE'. Otherwise, continue with the next step.")
+            else:
+                feedback_parts.append("   Tool executed successfully. Continue with the next step to complete the task.")
+        else:
+            feedback_parts.append("   Tool failed. Please try a different approach or provide more specific instructions.")
+        
+        return "\n".join(feedback_parts)
     
     async def _execute_single_tool(self, tool_name: str, parameters: Dict[str, Any]) -> CommandResult:
         """Execute a single tool call.

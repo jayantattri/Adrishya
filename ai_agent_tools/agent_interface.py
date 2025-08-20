@@ -128,11 +128,17 @@ class AgentInterface:
                 "success": response.success
             })
             
-            # Print response
+            # Print response with reasoning separation
             if response.success:
-                print(f"✅ Response: {response.message}")
+                # Check if this is a reasoning model response
+                if response.thinking:
+                    print(f"\n🧠 REASONING:")
+                    print(f"   {response.thinking}")
+                
+                print(f"\n✅ ACTION: {response.message}")
+                
                 if response.tool_calls:
-                    print(f"🔧 Executed {len(response.tool_calls)} tool(s):")
+                    print(f"\n🔧 Tools used: {len(response.tool_calls)}")
                     for i, tool_call in enumerate(response.tool_calls, 1):
                         tool_name = tool_call.get("name", "unknown")
                         params = tool_call.get("parameters", {})
@@ -141,13 +147,14 @@ class AgentInterface:
                     # Show execution results
                     successful = sum(1 for r in response.execution_results if r.success)
                     total = len(response.execution_results)
-                    print(f"📊 Results: {successful}/{total} successful")
+                    print(f"\n📊 Results: {successful}/{total} successful")
             else:
                 print(f"❌ Error: {response.error}")
             
             return {
                 "success": response.success,
                 "message": response.message,
+                "reasoning": response.thinking,
                 "tool_calls": response.tool_calls,
                 "execution_results": [r.__dict__ for r in response.execution_results],
                 "error": response.error
@@ -320,7 +327,7 @@ def list_agent_profiles() -> List[str]:
 # Qutebrowser command integration
 if QUTEBROWSER_AVAILABLE:
     
-    @cmdutils.register(instance='ai-agent', scope='global')
+    @cmdutils.register(scope='global')
     def ai_agent_init(profile: str = "default", api_key: str = None):
         """Initialize AI browser agent.
         
@@ -331,13 +338,17 @@ if QUTEBROWSER_AVAILABLE:
         try:
             success = agent_interface.initialize_agent(profile, api_key)
             if success:
-                message.info(f"AI agent initialized with profile: {profile}")
+                message.info(f"✅ AI agent initialized with profile: {profile}")
+                print(f"🤖 AI agent ready! Profile: {profile}")
+                if profile == "deepseek_assistant":
+                    print("🧠 Using DeepSeek R1 14B model via Ollama")
             else:
-                message.error("Failed to initialize AI agent")
+                message.error("❌ Failed to initialize AI agent")
         except Exception as e:
-            message.error(f"AI agent initialization error: {e}")
+            message.error(f"❌ AI agent initialization error: {e}")
+            print(f"Error details: {e}")
     
-    @cmdutils.register(instance='ai-agent', scope='global')
+    @cmdutils.register(scope='global')
     def ai_agent_ask(query: str):
         """Ask the AI agent to perform a browser task.
         
@@ -345,10 +356,14 @@ if QUTEBROWSER_AVAILABLE:
             query: Natural language query
         """
         if not agent_interface.agent:
-            message.error("AI agent not initialized. Use :ai-agent-init first")
+            message.error("❌ AI agent not initialized. Use :ai-agent-init first")
+            print("💡 Try: :ai-agent-init deepseek_assistant")
             return
         
         try:
+            print(f"🤖 Processing: {query}")
+            message.info(f"🤖 AI agent processing: {query}")
+            
             # Run async query in event loop
             import asyncio
             loop = asyncio.new_event_loop()
@@ -357,21 +372,78 @@ if QUTEBROWSER_AVAILABLE:
             loop.close()
             
             if response.get("success"):
-                message.info(f"AI agent: {response['message']}")
+                message.info(f"✅ AI agent: {response['message']}")
+                print(f"✅ Success: {response['message']}")
+                
+                # Show tool execution details
+                tool_calls = response.get("tool_calls", [])
+                if tool_calls:
+                    print(f"🔧 Tools used: {len(tool_calls)}")
+                    for tool_call in tool_calls:
+                        print(f"   - {tool_call.get('name', 'Unknown tool')}")
             else:
-                message.error(f"AI agent error: {response.get('error', 'Unknown error')}")
+                error_msg = response.get('error', 'Unknown error')
+                message.error(f"❌ AI agent error: {error_msg}")
+                print(f"❌ Error: {error_msg}")
                 
         except Exception as e:
-            message.error(f"AI agent query error: {e}")
+            message.error(f"❌ AI agent query error: {e}")
+            print(f"❌ Exception: {e}")
     
-    @cmdutils.register(instance='ai-agent', scope='global')
+    @cmdutils.register(scope='global')
     def ai_agent_status():
-        """Show AI agent status."""
+        """Show AI agent status and available profiles."""
         try:
-            agent_interface.get_status()
-            message.info("AI agent status displayed in console")
+            status = agent_interface.get_status()
+            print("🤖 AI Agent Status:")
+            print(f"   Initialized: {status.get('agent_initialized', False)}")
+            print(f"   Provider: {status.get('llm_provider', 'None')}")
+            print(f"   Model: {status.get('model', 'None')}")
+            
+            profiles = agent_interface.list_profiles()
+            print(f"\n📋 Available Profiles:")
+            for profile in profiles:
+                print(f"   • {profile}")
+            
+            message.info("🤖 AI agent status displayed in console")
+            
         except Exception as e:
-            message.error(f"AI agent status error: {e}")
+            message.error(f"❌ AI agent status error: {e}")
+    
+    @cmdutils.register(scope='global')
+    def ai_agent_help():
+        """Show AI agent help and examples."""
+        help_text = """
+🤖 AI Browser Agent Help
+========================
+
+Commands:
+  :ai-agent-init <profile>     Initialize AI agent with profile
+  :ai-agent-ask <query>        Ask AI agent to perform browser task
+  :ai-agent-status             Show agent status and profiles
+  :ai-agent-help               Show this help
+
+Profiles:
+  • deepseek_assistant    DeepSeek R1 14B (local, privacy-focused)
+  • default              OpenAI GPT-4 (cloud, general-purpose)
+  • research_assistant   Anthropic Claude (cloud, research-focused)
+  • automation_expert    OpenAI GPT-4 (cloud, automation-focused)
+  • local_assistant      Llama2 (local, basic)
+  • quick_helper         OpenAI GPT-3.5 (cloud, fast)
+
+Examples:
+  :ai-agent-init deepseek_assistant
+  :ai-agent-ask "open github.com"
+  :ai-agent-ask "help me research Python frameworks"
+  :ai-agent-ask "open reddit.com in a new tab"
+  :ai-agent-ask "find the contact form and fill it with my email"
+
+For DeepSeek R1 14B (recommended):
+  :ai-agent-init deepseek_assistant
+  :ai-agent-ask "open stackoverflow and search for qutebrowser"
+"""
+        print(help_text)
+        message.info("🤖 AI agent help displayed in console")
 
 
 # Main interface setup for qutebrowser
