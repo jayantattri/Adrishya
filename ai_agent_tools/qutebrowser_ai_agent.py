@@ -148,26 +148,65 @@ def ai_agent_ask(query: str):
         print(f"🤖 Processing: {query}")
         message.info(f"🤖 AI agent processing: {query}")
         
-        # Run async query in event loop
+        # Create a streaming callback to show real-time progress
+        def streaming_callback(update_type: str, content: str, **kwargs):
+            """Callback to handle streaming updates from the AI agent."""
+            if update_type == "thinking":
+                print(f"\n🧠 REASONING:")
+                print(f"   {content}")
+                print()  # Add spacing
+            elif update_type == "tool_call":
+                tool_name = kwargs.get('tool_name', 'unknown')
+                params = kwargs.get('parameters', {})
+                print(f"🔧 Executing: {tool_name}")
+                if params:
+                    print(f"   Parameters: {params}")
+            elif update_type == "tool_result":
+                tool_name = kwargs.get('tool_name', 'unknown')
+                success = kwargs.get('success', False)
+                result = kwargs.get('result', '')
+                status = "✅" if success else "❌"
+                print(f"{status} {tool_name}: {result}")
+            elif update_type == "progress":
+                print(f"📊 {content}")
+            elif update_type == "error":
+                print(f"❌ Error: {content}")
+        
+        # Run async query with streaming
+        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        response = loop.run_until_complete(ask_agent(query))
+        
+        # Create a task that can be monitored
+        async def process_with_streaming():
+            try:
+                # Import and use the streaming wrapper
+                from .streaming_agent import create_streaming_agent
+                
+                # Create streaming wrapper
+                streaming_agent = create_streaming_agent(ai_agent)
+                streaming_agent.set_streaming_callback(streaming_callback)
+                
+                # Process with streaming
+                response = await streaming_agent.process_query_with_streaming(query)
+                
+                return response
+                
+            except Exception as e:
+                print(f"❌ Processing error: {e}")
+                raise
+        
+        response = loop.run_until_complete(process_with_streaming())
         loop.close()
         
+        # Final status message
         if response.get("success"):
             message.info(f"✅ AI agent: {response['message']}")
-            print(f"✅ Success: {response['message']}")
-            
-            # Show tool execution details
-            tool_calls = response.get("tool_calls", [])
-            if tool_calls:
-                print(f"🔧 Tools used: {len(tool_calls)}")
-                for tool_call in tool_calls:
-                    print(f"   - {tool_call.get('name', 'Unknown tool')}")
+            print(f"\n🎉 Task completed successfully!")
         else:
             error_msg = response.get('error', 'Unknown error')
             message.error(f"❌ AI agent error: {error_msg}")
-            print(f"❌ Error: {error_msg}")
+            print(f"\n💥 Task failed: {error_msg}")
             
     except Exception as e:
         error_msg = f"Error processing query: {e}"

@@ -574,6 +574,87 @@ class EnhancedSequentialAgent:
                 error=str(e)
             )
     
+    async def process_query_with_streaming(self, user_query: str, streaming_callback=None) -> SequentialAgentResponse:
+        """Process a query with real-time streaming updates.
+        
+        Args:
+            user_query: The user's query string
+            streaming_callback: Optional callback function for streaming updates
+                Callback signature: callback(update_type, content, **kwargs)
+                Update types: "thinking", "tool_call", "tool_result", "progress", "error"
+        
+        Returns:
+            SequentialAgentResponse with the final result
+        """
+        if streaming_callback is None:
+            # Fall back to regular processing if no callback provided
+            return await self.process_query(user_query)
+        
+        try:
+            # Initialize execution state
+            execution_state = ExecutionState()
+            execution_state.start_time = time.time()
+            
+            # Add user query to conversation history
+            self.conversation_history.append({"role": "user", "content": user_query})
+            
+            # Create initial messages
+            messages = self._create_initial_messages(user_query)
+            
+            # Stream the reasoning process
+            if streaming_callback:
+                streaming_callback("progress", "Starting AI analysis...")
+            
+            # Execute sequential tool calling with streaming
+            final_response = await self._execute_sequential_tool_calling_with_streaming(
+                messages, user_query, execution_state, streaming_callback
+            )
+            
+            # Create response with execution statistics
+            execution_stats = {
+                'total_iterations': execution_state.iteration_count,
+                'total_tools_executed': len(execution_state.all_tool_calls),
+                'successful_tools': sum(1 for r in execution_state.all_execution_results if r.success),
+                'failed_tools': sum(1 for r in execution_state.all_execution_results if not r.success),
+                'execution_time': time.time() - execution_state.start_time,
+                'task_completed': execution_state.task_completed
+            }
+            
+            response = SequentialAgentResponse(
+                success=True,
+                message=final_response.get("content", "Task completed"),
+                tool_calls=execution_state.all_tool_calls,
+                execution_results=execution_state.all_execution_results,
+                thinking=final_response.get("reasoning"),
+                error=execution_state.last_error,
+                execution_stats=execution_stats
+            )
+            
+            # Update conversation history
+            self.conversation_history.extend([
+                {"role": "user", "content": user_query},
+                {"role": "assistant", "content": response.message}
+            ])
+            
+            # Keep history manageable
+            if len(self.conversation_history) > 20:
+                self.conversation_history = self.conversation_history[-20:]
+            
+            self.last_response = response
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error processing query: {e}")
+            if streaming_callback:
+                streaming_callback("error", f"Processing error: {str(e)}")
+            return SequentialAgentResponse(
+                success=False,
+                message=f"Error processing your request: {str(e)}",
+                tool_calls=[],
+                execution_results=[],
+                error=str(e)
+            )
+    
     async def _execute_sequential_tool_calling(self, initial_messages: List[Dict[str, Any]], 
                                              user_query: str, execution_state: ExecutionState) -> Dict[str, Any]:
         """Execute sequential tool calling with enhanced state management."""
@@ -704,6 +785,115 @@ class EnhancedSequentialAgent:
             self.logger.warning(f"Reached maximum iterations ({execution_state.max_iterations}), stopping tool execution")
         
         return final_response or {"content": "Task processing completed"}
+    
+    async def _execute_sequential_tool_calling_with_streaming(self, initial_messages: List[Dict[str, Any]], 
+                                                           user_query: str, execution_state: ExecutionState,
+                                                           streaming_callback) -> Dict[str, Any]:
+        """Execute sequential tool calling with real-time streaming updates."""
+        current_messages = initial_messages.copy()
+        max_iterations = self.config.max_tool_calls
+        
+        for iteration in range(max_iterations):
+            execution_state.iteration_count = iteration + 1
+            
+            if streaming_callback:
+                streaming_callback("progress", f"Iteration {iteration + 1}/{max_iterations}")
+            
+            # Generate response from LLM
+            llm_response = await self.llm_provider.generate_response(
+                current_messages, self.tools, execution_state
+            )
+            
+            # Parse the response
+            reasoning, action_response, tool_calls = self.llm_provider.parse_response(llm_response)
+            
+            # Stream the reasoning
+            if reasoning and streaming_callback:
+                streaming_callback("thinking", reasoning)
+            
+            # Check if task is complete
+            if not tool_calls:
+                if streaming_callback:
+                    streaming_callback("progress", "Task completed - no more tools needed")
+                return {
+                    "content": action_response,
+                    "reasoning": reasoning
+                }
+            
+            # Execute tool calls
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("name")
+                parameters = tool_call.get("parameters", {})
+                
+                if streaming_callback:
+                    streaming_callback("tool_call", f"Executing {tool_name}", 
+                                     tool_name=tool_name, parameters=parameters)
+                
+                # Execute the tool
+                try:
+                    result = await self._execute_tool(tool_name, parameters)
+                    execution_state.all_tool_calls.append(tool_call)
+                    execution_state.all_execution_results.append(result)
+                    
+                    if streaming_callback:
+                        success = result.success
+                        result_msg = result.message if hasattr(result, 'message') else str(result)
+                        streaming_callback("tool_result", result_msg,
+                                         tool_name=tool_name, success=success, result=result_msg)
+                    
+                    # Add tool result to messages
+                    current_messages.append({
+                        "role": "assistant",
+                        "content": f"TOOL_CALL: {json.dumps(tool_call)}"
+                    })
+                    current_messages.append({
+                        "role": "tool",
+                        "content": json.dumps({
+                            "success": result.success,
+                            "result": result_msg
+                        })
+                    })
+                    
+                except Exception as e:
+                    error_msg = f"Tool execution failed: {str(e)}"
+                    execution_state.last_error = error_msg
+                    
+                    if streaming_callback:
+                        streaming_callback("error", error_msg)
+                    
+                    # Add error to messages
+                    current_messages.append({
+                        "role": "assistant",
+                        "content": f"TOOL_CALL: {json.dumps(tool_call)}"
+                    })
+                    current_messages.append({
+                        "role": "tool",
+                        "content": json.dumps({
+                            "success": False,
+                            "error": error_msg
+                        })
+                    })
+            
+            # Check if we should continue
+            if execution_state.task_completed:
+                if streaming_callback:
+                    streaming_callback("progress", "Task marked as completed")
+                break
+        
+        # Generate final response
+        if streaming_callback:
+            streaming_callback("progress", "Generating final response...")
+        
+        final_llm_response = await self.llm_provider.generate_response(
+            current_messages, [], execution_state
+        )
+        
+        final_reasoning, final_content, _ = self.llm_provider.parse_response(final_llm_response)
+        
+        return {
+            "content": final_content,
+            "reasoning": final_reasoning
+        }
     
     def _create_tool_signature(self, tool_name: str, parameters: Dict[str, Any]) -> str:
         """Create a unique signature for a tool call to detect duplicates."""
